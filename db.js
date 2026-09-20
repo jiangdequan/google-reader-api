@@ -76,7 +76,56 @@ const SQL_CHUNK = 90; // keep IN (...) well under bind-variable limits (local mi
 export async function ensureSchema(env) {
   if (schemaReady.has(env)) return;
   await env.DB.batch(SCHEMA.map((s) => env.DB.prepare(s)));
+  await normalizeStateKeys(env);
   schemaReady.set(env, true);
+}
+
+async function normalizeStateKeys(env) {
+  const res = await env.DB.prepare(
+    "SELECT DISTINCT item_id FROM (SELECT item_id FROM item_states UNION SELECT item_id FROM item_tags) WHERE item_id NOT LIKE 'tag:%'",
+  ).all();
+  const keys = (res.results || []).map((r) => r.item_id);
+  if (!keys.length) return;
+  const byRowid = new Map();
+  for (const k of keys) {
+    const s = String(k).trim();
+    let n = NaN;
+    if (s.length === 16 && /^[0-9a-fA-F]{16}$/.test(s)) {
+      n = parseInt(s, 16);
+    } else if (/^[0-9a-fA-F]{1,7}$/.test(s)) {
+      n = /^\d+$/.test(s) ? parseInt(s, 10) : parseInt(s, 16);
+    }
+    if (Number.isSafeInteger(n) && n > 0) byRowid.set(n, s);
+  }
+  const rowids = [...byRowid.keys()];
+  for (let i = 0; i < rowids.length; i += SQL_CHUNK) {
+    const chunk = rowids.slice(i, i + SQL_CHUNK);
+    const found = await env.DB.prepare(
+      `SELECT rowid, id FROM items WHERE rowid IN (${chunk.map(() => '?').join(',')})`,
+    )
+      .bind(...chunk)
+      .all();
+    const stmts = [];
+    for (const row of found.results || []) {
+      const legacy = byRowid.get(row.rowid);
+      if (!legacy || String(row.id) === String(legacy)) continue;
+      stmts.push(
+        env.DB.prepare(
+          'INSERT OR IGNORE INTO item_states(user_id, item_id, state) SELECT user_id, ?, state FROM item_states WHERE item_id = ?',
+        ).bind(row.id, legacy),
+      );
+      stmts.push(env.DB.prepare('DELETE FROM item_states WHERE item_id = ?').bind(legacy));
+      stmts.push(
+        env.DB.prepare(
+          'INSERT OR IGNORE INTO item_tags(user_id, item_id, label) SELECT user_id, ?, label FROM item_tags WHERE item_id = ?',
+        ).bind(row.id, legacy),
+      );
+      stmts.push(env.DB.prepare('DELETE FROM item_tags WHERE item_id = ?').bind(legacy));
+    }
+    for (let j = 0; j < stmts.length; j += 80) {
+      await env.DB.batch(stmts.slice(j, j + 80));
+    }
+  }
 }
 
 export async function hashPassword(password, salt) {

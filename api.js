@@ -70,28 +70,30 @@ function tagObject(term) {
 async function applyTag(env, user, itemId, term, on) {
   const t = tagObject(term);
   const uid = user.id;
+  const rows = await getItemsByIds(env, uid, [itemId]);
+  const id = rows.length ? rows[0].id : itemId;
   if (t.kind === 'state') {
     const st = t.state;
     if (st === 'read') {
-      await setItemState(env, uid, itemId, 'read', on);
-      if (on) await setItemState(env, uid, itemId, 'kept-unread', false);
+      await setItemState(env, uid, id, 'read', on);
+      if (on) await setItemState(env, uid, id, 'kept-unread', false);
     } else if (st === 'unread') {
-      await setItemState(env, uid, itemId, 'read', !on);
+      await setItemState(env, uid, id, 'read', !on);
     } else if (st === 'kept-unread') {
       if (on) {
-        await setItemState(env, uid, itemId, 'read', false);
-        await setItemState(env, uid, itemId, 'kept-unread', true);
+        await setItemState(env, uid, id, 'read', false);
+        await setItemState(env, uid, id, 'kept-unread', true);
       } else {
-        await setItemState(env, uid, itemId, 'kept-unread', false);
+        await setItemState(env, uid, id, 'kept-unread', false);
       }
     } else if (st === 'starred') {
-      await setItemState(env, uid, itemId, 'starred', on);
+      await setItemState(env, uid, id, 'starred', on);
     } else if (st === 'broadcast') {
-      await setItemState(env, uid, itemId, 'broadcast', on);
+      await setItemState(env, uid, id, 'broadcast', on);
     }
     // com.google/tracking-* ignored
   } else if (t.kind === 'label') {
-    await setItemLabel(env, uid, itemId, t.name, on);
+    await setItemLabel(env, uid, id, t.name, on);
   }
 }
 
@@ -634,7 +636,7 @@ export async function streamItemsIds(request, env, user) {
     const states = withDirect ? await getStatesForItems(env, user.id, rows.map((r) => r.id)) : null;
     out.itemRefs = rows.map((r) => {
       const ref = {
-id: 'tag:google.com,2005:reader/item/' + (Number(r.rowid ?? 0) || 0).toString(16).padStart(16, '0'),
+        id: String(Number(r.rowid ?? 0) || 0),
         timestampUsec: r.timestamp_usec,
       };
       if (withDirect) {
