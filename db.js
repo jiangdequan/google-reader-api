@@ -436,12 +436,15 @@ export async function feedUnread(env, userId) {
   const res = await env.DB.prepare(
     `SELECT i.feed_id AS feed_id, COUNT(*) AS c, MAX(i.published) AS m
      FROM items i
-     WHERE NOT EXISTS (
+     WHERE EXISTS (
+       SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id
+     )
+     AND NOT EXISTS (
        SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='read'
      )
      GROUP BY i.feed_id`,
   )
-    .bind(userId)
+    .bind(userId, userId)
     .all();
   return res.results || [];
 }
@@ -466,21 +469,27 @@ export async function readingListUnread(env, userId) {
   return await env.DB.prepare(
     `SELECT COUNT(*) AS c, MAX(i.published) AS m
      FROM items i
-     WHERE NOT EXISTS (
+     WHERE EXISTS (
+       SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id
+     )
+     AND NOT EXISTS (
        SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='read'
      )`,
   )
-    .bind(userId)
+    .bind(userId, userId)
     .first();
 }
 
 export async function starredUnread(env, userId) {
   const r = await env.DB.prepare(
     `SELECT COUNT(*) AS c FROM items i
-     WHERE EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='starred')
-       AND NOT EXISTS (SELECT 1 FROM item_states s2 WHERE s2.user_id=? AND s2.item_id=i.id AND s2.state='read')`,
+     WHERE EXISTS (
+       SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id
+     )
+     AND EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='starred')
+     AND NOT EXISTS (SELECT 1 FROM item_states s2 WHERE s2.user_id=? AND s2.item_id=i.id AND s2.state='read')`,
   )
-    .bind(userId, userId)
+    .bind(userId, userId, userId)
     .first();
   return r ? r.c : 0;
 }
@@ -524,7 +533,12 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
     );
   } else if (stream.kind === 'state') {
     const st = stream.state;
-    if (st === 'starred' || st === 'broadcast' || st === 'kept-unread' || st === 'read') {
+    if (st === 'reading-list' || st === 'unread') {
+      add(
+        'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
+        userId,
+      );
+    } else if (st === 'starred' || st === 'broadcast' || st === 'kept-unread' || st === 'read') {
       add(
         'EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state=?)',
         userId,
