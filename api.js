@@ -121,10 +121,6 @@ async function resolveStreamIds(env, terms) {
   return out;
 }
 
-function contEnc(offset) {
-  return b64urlEncode('v1|' + offset);
-}
-
 function contDec(c) {
   if (!c) return 0;
   try {
@@ -133,6 +129,21 @@ function contDec(c) {
     return m ? parseInt(m[1], 10) : 0;
   } catch (e) {
     return 0;
+  }
+}
+
+function cursorEnc(order, published, id) {
+  return b64urlEncode('v2|' + (order === 'o' ? 'o' : 'd') + '|' + published + '|' + id);
+}
+
+function cursorDec(c) {
+  if (!c) return null;
+  try {
+    const s = b64urlDecode(String(c));
+    const m = s.match(/^v2\|(o|d)\|(-?\d+)\|(.+)$/);
+    return m ? { order: m[1] === 'o' ? 'o' : '', published: parseInt(m[2], 10), id: m[3] } : null;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -587,6 +598,7 @@ export async function streamContents(request, env, user) {
     order: url.searchParams.get('r') || '',
     limit: clampInt(url.searchParams.get('n'), 20, 1, 1000),
     offset: contDec(url.searchParams.get('c')),
+    cursor: cursorDec(url.searchParams.get('c')),
     xtResolved: await resolveStreamIds(env, url.searchParams.getAll('xt')),
     itResolved: await resolveStreamIds(env, url.searchParams.getAll('it')),
     ot: url.searchParams.get('ot') ? parseInt(url.searchParams.get('ot'), 10) : null,
@@ -603,11 +615,14 @@ export async function streamContents(request, env, user) {
   out.self = [{ href: url.origin + url.pathname, id: out.id }];
 
   if (stream.kind !== 'unknown') {
-    const { rows, hasMore, nextOffset } = await getItemsStream(env, user.id, stream, opts);
+    const { rows, hasMore } = await getItemsStream(env, user.id, stream, opts);
     const states = await getStatesForItems(env, user.id, rows.map((r) => r.id));
     const labels = await getLabelsForItems(env, user.id, rows.map((r) => r.id));
     out.items = rows.map((r) => itemToJson(r, user.id, states, labels));
-    if (hasMore) out.continuation = contEnc(nextOffset);
+    if (hasMore && rows.length) {
+      const last = rows[rows.length - 1];
+      out.continuation = cursorEnc(opts.order, last.published, last.id);
+    }
   }
 
   const output = url.searchParams.get('output');
@@ -624,6 +639,8 @@ export async function streamItemsIds(request, env, user) {
     order: url.searchParams.get('r') || '',
     limit: clampInt(url.searchParams.get('n'), 20, 1, 5000),
     offset: contDec(url.searchParams.get('c')),
+    cursor: cursorDec(url.searchParams.get('c')),
+    refsOnly: true,
     xtResolved: await resolveStreamIds(env, url.searchParams.getAll('xt')),
     itResolved: await resolveStreamIds(env, url.searchParams.getAll('it')),
     ot: url.searchParams.get('ot') ? parseInt(url.searchParams.get('ot'), 10) : null,
@@ -632,7 +649,8 @@ export async function streamItemsIds(request, env, user) {
   const withDirect = url.searchParams.get('includeAllDirectStreamIds') === 'true';
   const out = { itemRefs: [] };
   if (stream.kind !== 'unknown') {
-    const { rows, hasMore, nextOffset } = await getItemsStream(env, user.id, stream, opts);
+    const opts2 = withDirect ? { ...opts, refsOnly: false } : opts;
+    const { rows, hasMore } = await getItemsStream(env, user.id, stream, opts2);
     const states = withDirect ? await getStatesForItems(env, user.id, rows.map((r) => r.id)) : null;
     out.itemRefs = rows.map((r) => {
       const ref = {
@@ -649,7 +667,10 @@ export async function streamItemsIds(request, env, user) {
       }
       return ref;
     });
-    if (hasMore) out.continuation = contEnc(nextOffset);
+    if (hasMore && rows.length) {
+      const last = rows[rows.length - 1];
+      out.continuation = cursorEnc(opts.order, last.published, last.id);
+    }
   }
   return json(out);
 }

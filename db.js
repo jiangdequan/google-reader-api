@@ -610,18 +610,42 @@ export async function getItemsStream(env, userId, stream, opts) {
   const desc = opts.order !== 'o';
   const order = `i.published ${desc ? 'DESC' : 'ASC'}, i.id ${desc ? 'DESC' : 'ASC'}`;
   const limit = opts.limit || 20;
-  const offset = opts.offset || 0;
+  let conds = where;
+  const a = [...args];
+  let tail = ` ORDER BY ${order} LIMIT ?`;
+  if (opts.cursor) {
+    const c = opts.cursor;
+    const op = desc ? '<' : '>';
+    conds +=
+      (conds ? ' AND ' : ' WHERE ') +
+      `(i.published ${op} ? OR (i.published = ? AND i.id ${op} ?))`;
+    a.push(c.published, c.published, c.id, limit + 1);
+  } else if (opts.offset) {
+    tail += ' OFFSET ?';
+    a.push(limit + 1, opts.offset);
+  } else {
+    a.push(limit + 1);
+  }
+  if (opts.refsOnly) {
+    // stream/items/ids only needs ids + timestamps; skip the feed join and payload columns.
+    const res = await env.DB.prepare(
+      `SELECT i.rowid, i.id, i.published, i.timestamp_usec FROM items i ${conds}${tail}`,
+    )
+      .bind(...a)
+      .all();
+    const rows = (res.results || []).slice(0, limit);
+    return { rows, hasMore: (res.results || []).length > limit };
+  }
   const res = await env.DB.prepare(
     `SELECT i.rowid, i.*, f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
      FROM items i JOIN feeds f ON f.id = i.feed_id
-     ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
+     ${conds}${tail}`,
   )
-    .bind(...args, limit + 1, offset)
+    .bind(...a)
     .all();
   return {
     rows: (res.results || []).slice(0, limit),
     hasMore: (res.results || []).length > limit,
-    nextOffset: offset + limit,
   };
 }
 
