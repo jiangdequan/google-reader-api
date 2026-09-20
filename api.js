@@ -174,7 +174,7 @@ function itemToJson(r, uid, states, labels) {
   if (stateSet.has('kept-unread')) cats.push('user/-/state/com.google/kept-unread');
   for (const l of labels[r.id] || []) cats.push('user/-/label/' + l);
   const href = r.url || '';
-  const hexId = String(r.rowid ?? 0).toString(16).padStart(16, '0');
+  const hexId = (Number(r.rowid ?? 0) || 0).toString(16).padStart(16, '0');
   const item = {
     origin: {
       streamId: 'feed/' + r.feed_url,
@@ -183,6 +183,7 @@ function itemToJson(r, uid, states, labels) {
     },
     updated: r.published,
     id: 'tag:google.com,2005:reader/item/' + hexId,
+    guid: 'tag:google.com,2005:reader/item/' + hexId,
     categories: cats,
     title: r.title,
     published: r.published,
@@ -190,7 +191,7 @@ function itemToJson(r, uid, states, labels) {
     crawlTimeMsec: String(r.crawl_time || Date.now()),
     shortId: `${r.rowid ?? ''}`,
     author: r.author || '',
-    canonical: href ? [{ href }] : [],
+    canonical: [{ href }],
     alternate: href ? [{ href, type: 'text/html' }] : [],
     content: { direction: 'ltr', content: r.content || '' },
     summary: { content: r.content || '' },
@@ -294,13 +295,14 @@ export async function unreadCount(request, env, user) {
 
   const feedRows = await feedUnread(env, user.id);
   const urlById = {};
-  if (feedRows.length) {
-    const feedIds = feedRows.map((r) => r.feed_id);
-    const ph = feedIds.map(() => '?').join(',');
+  const feedIds = [...new Set(feedRows.map((r) => r.feed_id))];
+  for (let i = 0; i < feedIds.length; i += 90) {
+    const chunk = feedIds.slice(i, i + 400);
+    const ph = chunk.map(() => '?').join(',');
     const feeds = await env.DB.prepare(
       `SELECT id, url FROM feeds WHERE id IN (${ph})`,
     )
-      .bind(...feedIds)
+      .bind(...chunk)
       .all();
     for (const f of feeds.results || []) urlById[f.id] = f.url;
   }
@@ -377,6 +379,12 @@ export async function subscriptionList(request, env, user) {
         htmlUrl: s.feed_html || s.feed_url || '',
         iconUrl: iconUrl(origin, s.feed_url),
         url: s.feed_url,
+        origin: {
+          streamId: 'feed/' + s.feed_url,
+          title,
+          htmlUrl: s.feed_html || s.feed_url || '',
+          url: s.feed_url,
+        },
       };
     }),
   });
@@ -566,6 +574,12 @@ export async function streamContents(request, env, user) {
     token = url.searchParams.get('s').replace(/^user\/[^/]+\//, 'user/-/');
   }
 
+  if (!token) {
+    // Fluent Reader / EasyRSS / FeedMe call bare stream/contents with no stream id;
+    // default to the user's reading list.
+    token = 'user/-/state/com.google/reading-list';
+  }
+
   const stream = await resolveStreamId(env, token);
   const opts = {
     order: url.searchParams.get('r') || '',
@@ -619,7 +633,10 @@ export async function streamItemsIds(request, env, user) {
     const { rows, hasMore, nextOffset } = await getItemsStream(env, user.id, stream, opts);
     const states = withDirect ? await getStatesForItems(env, user.id, rows.map((r) => r.id)) : null;
     out.itemRefs = rows.map((r) => {
-      const ref = { id: `${r.rowid}`, timestampUsec: r.timestamp_usec };
+      const ref = {
+id: 'tag:google.com,2005:reader/item/' + (Number(r.rowid ?? 0) || 0).toString(16).padStart(16, '0'),
+        timestampUsec: r.timestamp_usec,
+      };
       if (withDirect) {
         const st = states[r.id] || new Set();
         const ds = ['user/-/state/com.google/reading-list', `feed/${r.feed_url}`];
@@ -680,7 +697,10 @@ export async function searchItemsIds(request, env, user) {
   if (!q) return json({ results: [] });
   const rows = await searchItemsDb(env, user.id, q, {});
   return json({
-    results: rows.map((r) => ({ id: `${r.rowid}`, timestampUsec: String(r.published * 1000000) })),
+    results: rows.map((r) => ({
+      id: 'tag:google.com,2005:reader/item/' + (Number(r.rowid ?? 0) || 0).toString(16).padStart(16, '0'),
+      timestampUsec: String(r.published * 1000000),
+    })),
   });
 }
 

@@ -71,6 +71,8 @@ const SCHEMA = [
 
 const schemaReady = new WeakMap();
 
+const SQL_CHUNK = 90; // keep IN (...) well under bind-variable limits (local miniflare ≈100, prod D1 999)
+
 export async function ensureSchema(env) {
   if (schemaReady.has(env)) return;
   await env.DB.batch(SCHEMA.map((s) => env.DB.prepare(s)));
@@ -304,15 +306,18 @@ export async function getSubscriptions(env, userId) {
 }
 
 export async function latestTimestamps(env, feedIds) {
-  if (!feedIds.length) return {};
-  const ph = feedIds.map(() => '?').join(',');
-  const res = await env.DB.prepare(
-    `SELECT feed_id, MAX(published)*1000 AS m FROM items WHERE feed_id IN (${ph}) GROUP BY feed_id`,
-  )
-    .bind(...feedIds)
-    .all();
   const map = {};
-  for (const r of res.results || []) map[r.feed_id] = r.m;
+  const unique = [...new Set(feedIds)];
+  for (let i = 0; i < unique.length; i += SQL_CHUNK) {
+    const chunk = unique.slice(i, i + SQL_CHUNK);
+    const ph = chunk.map(() => '?').join(',');
+    const res = await env.DB.prepare(
+      `SELECT feed_id, MAX(published)*1000 AS m FROM items WHERE feed_id IN (${ph}) GROUP BY feed_id`,
+    )
+      .bind(...chunk)
+      .all();
+    for (const r of res.results || []) map[r.feed_id] = r.m;
+  }
   return map;
 }
 
@@ -592,31 +597,37 @@ export async function latestStreamItem(env, userId, stream, opts) {
 }
 
 export async function getStatesForItems(env, userId, ids) {
-  if (!ids.length) return {};
-  const ph = ids.map(() => '?').join(',');
-  const res = await env.DB.prepare(
-    `SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`,
-  )
-    .bind(userId, ...ids)
-    .all();
   const map = {};
-  for (const r of res.results || []) {
-    (map[r.item_id] = map[r.item_id] || new Set()).add(r.state);
+  const unique = [...new Set(ids)];
+  for (let i = 0; i < unique.length; i += SQL_CHUNK) {
+    const chunk = unique.slice(i, i + SQL_CHUNK);
+    const ph = chunk.map(() => '?').join(',');
+    const res = await env.DB.prepare(
+      `SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`,
+    )
+      .bind(userId, ...chunk)
+      .all();
+    for (const r of res.results || []) {
+      (map[r.item_id] = map[r.item_id] || new Set()).add(r.state);
+    }
   }
   return map;
 }
 
 export async function getLabelsForItems(env, userId, ids) {
-  if (!ids.length) return {};
-  const ph = ids.map(() => '?').join(',');
-  const res = await env.DB.prepare(
-    `SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`,
-  )
-    .bind(userId, ...ids)
-    .all();
   const map = {};
-  for (const r of res.results || []) {
-    (map[r.item_id] = map[r.item_id] || []).push(r.label);
+  const unique = [...new Set(ids)];
+  for (let i = 0; i < unique.length; i += SQL_CHUNK) {
+    const chunk = unique.slice(i, i + SQL_CHUNK);
+    const ph = chunk.map(() => '?').join(',');
+    const res = await env.DB.prepare(
+      `SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`,
+    )
+      .bind(userId, ...chunk)
+      .all();
+    for (const r of res.results || []) {
+      (map[r.item_id] = map[r.item_id] || []).push(r.label);
+    }
   }
   return map;
 }
@@ -695,25 +706,26 @@ export async function getItemsByIds(env, userId, ids) {
       idsLong.push(v);
     }
   }
-  const cond = [];
-  const args = [];
-  if (rowids.length) {
-    cond.push(`i.rowid IN (${rowids.map(() => '?').join(',')})`);
-    args.push(...rowids);
+  const rows = [];
+  const runIn = async (chunk, sql) => {
+    const res = await env.DB.prepare(
+      `SELECT i.rowid, i.*, f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
+       FROM items i JOIN feeds f ON f.id = i.feed_id
+       WHERE ${sql}`,
+    )
+      .bind(...chunk)
+      .all();
+    rows.push(...(res.results || []));
+  };
+  for (let i = 0; i < rowids.length; i += SQL_CHUNK) {
+    const chunk = rowids.slice(i, i + SQL_CHUNK);
+    await runIn(chunk, `i.rowid IN (${chunk.map(() => '?').join(',')})`);
   }
-  if (idsLong.length) {
-    cond.push(`i.id IN (${idsLong.map(() => '?').join(',')})`);
-    args.push(...idsLong);
+  for (let i = 0; i < idsLong.length; i += SQL_CHUNK) {
+    const chunk = idsLong.slice(i, i + SQL_CHUNK);
+    await runIn(chunk, `i.id IN (${chunk.map(() => '?').join(',')})`);
   }
-  if (!cond.length) return [];
-  const res = await env.DB.prepare(
-    `SELECT i.rowid, i.*, f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
-     FROM items i JOIN feeds f ON f.id = i.feed_id
-     WHERE ${cond.join(' OR ')}`,
-  )
-    .bind(...args)
-    .all();
-  return res.results || [];
+  return rows;
 }
 
 export async function searchItems(env, userId, q, opts) {

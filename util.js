@@ -2,11 +2,13 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 export function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
+  const body = JSON.stringify(data);
+  return new Response(body, {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
+      'Content-Length': String(enc.encode(body).length),
     },
   });
 }
@@ -14,14 +16,22 @@ export function json(data, status = 200) {
 export function text(data, status = 200, contentType = 'text/plain; charset=utf-8') {
   return new Response(String(data), {
     status,
-    headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-store',
+      'Content-Length': String(enc.encode(String(data)).length),
+    },
   });
 }
 
 export function xml(data, status = 200, contentType = 'application/atom+xml; charset=utf-8') {
   return new Response(String(data), {
     status,
-    headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-store',
+      'Content-Length': String(enc.encode(String(data)).length),
+    },
   });
 }
 

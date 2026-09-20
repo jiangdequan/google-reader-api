@@ -22,11 +22,17 @@ export default {
   },
 
   async fetch(request, env, ctx) {
+    const u = new URL(request.url);
+    const brief = u.pathname + u.search;
     try {
       await ensureSchema(env);
       await ensureDefaultUsers(env);
-      return await route(request, env, ctx);
+      const resp = await route(request, env, ctx);
+      const size = resp.headers.get('content-length') || '?';
+      console.log(`[REQ] ${request.method} ${brief} -> ${resp.status} ${size}B`);
+      return resp;
     } catch (e) {
+      console.log(`[REQ] ${request.method} ${brief} -> ERR ${(e && e.message) || e}`);
       console.error('handler error', (e && e.stack) || e);
       return json({ error: ((e && e.message) || String(e)).slice(0, 500) }, 500);
     }
