@@ -372,15 +372,38 @@ export async function latestTimestamps(env, feedIds) {
 
 export async function insertNewItems(env, feedId, feedUrl, items) {
   if (!items.length) return 0;
-  const existingMap = new Map(
-    (await env.DB.prepare('SELECT guid, url FROM items WHERE feed_id=?').bind(feedId).all())
-      .results.map((r) => [r.guid, r.url]),
-  );
+  // Skip entries older than MAX_ITEM_AGE_DAYS (default 90). Entries without a
+  // publish date (published=0) are always kept, otherwise feeds without dates
+  // would silently end up empty.
+  const maxAge = Number(env.MAX_ITEM_AGE_DAYS) || 90;
+  const cutoff = maxAge > 0 ? now() - maxAge * 86400 : 0;
+  const candidates = [];
+  const seen = new Set();
+  for (const it of items) {
+    if (!it.guid) continue;
+    if (cutoff && it.published > 0 && it.published < cutoff) continue;
+    if (seen.has(it.guid)) continue;
+    seen.add(it.guid);
+    candidates.push(it);
+  }
+  if (!candidates.length) return 0;
+  // Only check existence for the incoming guids (chunked), instead of loading
+  // every stored guid of the feed into memory on each sync.
+  const existingMap = new Map();
+  for (let i = 0; i < candidates.length; i += SQL_CHUNK) {
+    const chunk = candidates.slice(i, i + SQL_CHUNK);
+    const ph = chunk.map(() => '?').join(',');
+    const res = await env.DB.prepare(
+      `SELECT guid, url FROM items WHERE feed_id=? AND guid IN (${ph})`,
+    )
+      .bind(feedId, ...chunk.map((c) => c.guid))
+      .all();
+    for (const r of res.results || []) existingMap.set(r.guid, r.url);
+  }
   const rows = [];
   const backfill = [];
   const tsNow = now() * 1000000;
-  for (const it of items) {
-    if (!it.guid) continue;
+  for (const it of candidates) {
     if (!existingMap.has(it.guid)) {
       const id = 'tag:google.com,2005:reader/item/' + (await sha1Hex(feedUrl + '\u0000' + it.guid));
       rows.push({

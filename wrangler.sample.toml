@@ -25,6 +25,8 @@ SYNC_INTERVAL_MIN = 15
 MAX_FETCH_PER_CRON = 20
 # Max items kept per feed (older items pruned)
 MAX_ITEMS_PER_FEED = 3000
+# Skip entries older than this many days on insert (0 disables; dates unknown kept)
+MAX_ITEM_AGE_DAYS = 90
 
 [triggers]
 crons = ["*/15 * * * *"]

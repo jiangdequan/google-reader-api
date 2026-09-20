@@ -161,6 +161,7 @@ curl -H "Authorization: GoogleLogin auth=<token>" "https://your-worker/reader/ap
 | `SYNC_INTERVAL_MIN` | 抓取间隔（分钟） | `15` |
 | `MAX_FETCH_PER_CRON` | 每次 Cron 最多抓取的源数量 | `20` |
 | `MAX_ITEMS_PER_FEED` | 每个源保留的最大文章数 | `3000` |
+| `MAX_ITEM_AGE_DAYS` | 入库时跳过 N 天以前的旧条目（`0` 关闭；无日期的条目总是保留） | `90` |
 
 Cron 表达式在 `wrangler.toml` 的 `[triggers]` 中，默认每 15 分钟一次。
 
