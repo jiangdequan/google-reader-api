@@ -72,6 +72,17 @@ const SCHEMA = [
 const schemaReady = new WeakMap();
 
 const SQL_CHUNK = 90; // keep IN (...) well under bind-variable limits (local miniflare ≈100, prod D1 999)
+const BATCH_CHUNK = 90; // D1 batch caps at 1000 statements; stay well under it per round trip
+
+// Send many prepared statements in a few single round trips to D1,
+// returning all D1Result objects flattened in statement order.
+async function batchAll(env, stmts) {
+  const out = [];
+  for (let i = 0; i < stmts.length; i += BATCH_CHUNK) {
+    out.push(...(await env.DB.batch(stmts.slice(i, i + BATCH_CHUNK))));
+  }
+  return out;
+}
 
 export async function ensureSchema(env) {
   if (schemaReady.has(env)) return;
@@ -332,24 +343,33 @@ export async function listTags(env, userId) {
 }
 
 export async function getSubscriptions(env, userId) {
-  const subs = await env.DB.prepare(
-    `SELECT s.user_id, s.feed_id, s.title AS custom_title,
-            f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
-     FROM subscriptions s JOIN feeds f ON f.id = s.feed_id
-     WHERE s.user_id = ?
-     ORDER BY (CASE WHEN s.title='' THEN f.title ELSE s.title END) ASC`,
-  )
-    .bind(userId)
-    .all();
-  const out = [];
-  for (const s of subs.results || []) {
-    const labels = await env.DB.prepare(
-      `SELECT t.name FROM subscription_tags st JOIN tags t ON t.id = st.tag_id
-       WHERE st.user_id=? AND st.feed_id=? ORDER BY t.name ASC`,
+  const [subsRes, labelsRes] = await Promise.all([
+    env.DB.prepare(
+      `SELECT s.user_id, s.feed_id, s.title AS custom_title,
+              f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
+       FROM subscriptions s JOIN feeds f ON f.id = s.feed_id
+       WHERE s.user_id = ?
+       ORDER BY (CASE WHEN s.title='' THEN f.title ELSE s.title END) ASC`,
     )
-      .bind(userId, s.feed_id)
-      .all();
-    out.push({ ...s, labels: (labels.results || []).map((l) => l.name) });
+      .bind(userId)
+      .all(),
+    env.DB.prepare(
+      `SELECT st.feed_id AS feed_id, t.name AS name
+       FROM subscription_tags st JOIN tags t ON t.id = st.tag_id
+       WHERE st.user_id = ?
+       ORDER BY t.name ASC`,
+    )
+      .bind(userId)
+      .all(),
+  ]);
+  const labelMap = new Map();
+  for (const l of labelsRes.results || []) {
+    if (!labelMap.has(l.feed_id)) labelMap.set(l.feed_id, []);
+    labelMap.get(l.feed_id).push(l.name);
+  }
+  const out = [];
+  for (const s of subsRes.results || []) {
+    out.push({ ...s, labels: labelMap.get(s.feed_id) || [] });
   }
   return out;
 }
@@ -357,14 +377,17 @@ export async function getSubscriptions(env, userId) {
 export async function latestTimestamps(env, feedIds) {
   const map = {};
   const unique = [...new Set(feedIds)];
+  const stmts = [];
   for (let i = 0; i < unique.length; i += SQL_CHUNK) {
     const chunk = unique.slice(i, i + SQL_CHUNK);
     const ph = chunk.map(() => '?').join(',');
-    const res = await env.DB.prepare(
-      `SELECT feed_id, MAX(published)*1000 AS m FROM items WHERE feed_id IN (${ph}) GROUP BY feed_id`,
-    )
-      .bind(...chunk)
-      .all();
+    stmts.push(
+      env.DB.prepare(
+        `SELECT feed_id, MAX(published)*1000 AS m FROM items WHERE feed_id IN (${ph}) GROUP BY feed_id`,
+      ).bind(...chunk),
+    );
+  }
+  for (const res of await batchAll(env, stmts)) {
     for (const r of res.results || []) map[r.feed_id] = r.m;
   }
   return map;
@@ -390,14 +413,17 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
   // Only check existence for the incoming guids (chunked), instead of loading
   // every stored guid of the feed into memory on each sync.
   const existingMap = new Map();
+  const checks = [];
   for (let i = 0; i < candidates.length; i += SQL_CHUNK) {
     const chunk = candidates.slice(i, i + SQL_CHUNK);
     const ph = chunk.map(() => '?').join(',');
-    const res = await env.DB.prepare(
-      `SELECT guid, url FROM items WHERE feed_id=? AND guid IN (${ph})`,
-    )
-      .bind(feedId, ...chunk.map((c) => c.guid))
-      .all();
+    checks.push(
+      env.DB.prepare(
+        `SELECT guid, url FROM items WHERE feed_id=? AND guid IN (${ph})`,
+      ).bind(feedId, ...chunk.map((c) => c.guid)),
+    );
+  }
+  for (const res of await batchAll(env, checks)) {
     for (const r of res.results || []) existingMap.set(r.guid, r.url);
   }
   const rows = [];
@@ -457,15 +483,16 @@ export async function pruneFeed(env, feedId, keep = 3000) {
 
 export async function feedUnread(env, userId) {
   const res = await env.DB.prepare(
-    `SELECT i.feed_id AS feed_id, COUNT(*) AS c, MAX(i.published) AS m
+    `SELECT i.feed_id AS feed_id, f.url AS feed_url, COUNT(*) AS c, MAX(i.published) AS m
      FROM items i
+     JOIN feeds f ON f.id = i.feed_id
      WHERE EXISTS (
        SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id
      )
      AND NOT EXISTS (
        SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='read'
      )
-     GROUP BY i.feed_id`,
+     GROUP BY i.feed_id, f.url`,
   )
     .bind(userId, userId)
     .all();
@@ -521,6 +548,11 @@ export async function resolveStreamId(env, token) {
   let s = String(token || '').trim();
   s = s.replace(/^feed\/(http[s]?):\/([^/])/, '$1://$$2');
   s = s.replace(/^user\/[^/]+\//, 'user/-/');
+  if (/^feed\/\d+$/.test(s)) {
+    const fid = Number(s.slice(5));
+    const f = await getFeedById(env, fid);
+    return { kind: 'feed', url: f ? f.url : '', feedId: f ? f.id : fid };
+  }
   if (s.startsWith('feed/http') || s.startsWith('feed/https')) {
     const url = s.slice(5);
     const f = await getFeedByUrl(env, url);
@@ -709,14 +741,17 @@ export async function latestStreamItem(env, userId, stream, opts) {
 export async function getStatesForItems(env, userId, ids) {
   const map = {};
   const unique = [...new Set(ids)];
+  const stmts = [];
   for (let i = 0; i < unique.length; i += SQL_CHUNK) {
     const chunk = unique.slice(i, i + SQL_CHUNK);
     const ph = chunk.map(() => '?').join(',');
-    const res = await env.DB.prepare(
-      `SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`,
-    )
-      .bind(userId, ...chunk)
-      .all();
+    stmts.push(
+      env.DB.prepare(
+        `SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`,
+      ).bind(userId, ...chunk),
+    );
+  }
+  for (const res of await batchAll(env, stmts)) {
     for (const r of res.results || []) {
       (map[r.item_id] = map[r.item_id] || new Set()).add(r.state);
     }
@@ -727,14 +762,17 @@ export async function getStatesForItems(env, userId, ids) {
 export async function getLabelsForItems(env, userId, ids) {
   const map = {};
   const unique = [...new Set(ids)];
+  const stmts = [];
   for (let i = 0; i < unique.length; i += SQL_CHUNK) {
     const chunk = unique.slice(i, i + SQL_CHUNK);
     const ph = chunk.map(() => '?').join(',');
-    const res = await env.DB.prepare(
-      `SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`,
-    )
-      .bind(userId, ...chunk)
-      .all();
+    stmts.push(
+      env.DB.prepare(
+        `SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`,
+      ).bind(userId, ...chunk),
+    );
+  }
+  for (const res of await batchAll(env, stmts)) {
     for (const r of res.results || []) {
       (map[r.item_id] = map[r.item_id] || []).push(r.label);
     }
@@ -812,28 +850,31 @@ export async function getItemsByIds(env, userId, ids) {
     } else if ((m = v.match(/^tag:google\.com,2005:reader\/item\/([0-9a-fA-F]+)$/)) && m[1].length <= 16) {
       const n = parseInt(m[1], 16);
       if (Number.isSafeInteger(n) && n > 0) rowids.push(String(n));
+    } else if ((m = v.match(/^[0-9a-fA-F]{16}$/))) {
+      const n = parseInt(m[0], 16);
+      if (Number.isSafeInteger(n) && n > 0) rowids.push(String(n));
     } else {
       idsLong.push(v);
     }
   }
   const rows = [];
-  const runIn = async (chunk, sql) => {
-    const res = await env.DB.prepare(
-      `SELECT i.rowid, i.*, f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
-       FROM items i JOIN feeds f ON f.id = i.feed_id
-       WHERE ${sql}`,
-    )
-      .bind(...chunk)
-      .all();
-    rows.push(...(res.results || []));
+  const stmts = [];
+  const build = (values, column) => {
+    for (let i = 0; i < values.length; i += SQL_CHUNK) {
+      const chunk = values.slice(i, i + SQL_CHUNK);
+      stmts.push(
+        env.DB.prepare(
+          `SELECT i.rowid, i.*, f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
+           FROM items i JOIN feeds f ON f.id = i.feed_id
+           WHERE i.${column} IN (${chunk.map(() => '?').join(',')})`,
+        ).bind(...chunk),
+      );
+    }
   };
-  for (let i = 0; i < rowids.length; i += SQL_CHUNK) {
-    const chunk = rowids.slice(i, i + SQL_CHUNK);
-    await runIn(chunk, `i.rowid IN (${chunk.map(() => '?').join(',')})`);
-  }
-  for (let i = 0; i < idsLong.length; i += SQL_CHUNK) {
-    const chunk = idsLong.slice(i, i + SQL_CHUNK);
-    await runIn(chunk, `i.id IN (${chunk.map(() => '?').join(',')})`);
+  build(rowids, 'rowid');
+  build(idsLong, 'id');
+  for (const res of await batchAll(env, stmts)) {
+    rows.push(...(res.results || []));
   }
   return rows;
 }

@@ -112,13 +112,14 @@ function clampInt(v, def, min, max) {
 }
 
 async function resolveStreamIds(env, terms) {
-  const out = [];
-  for (const term of terms || []) {
-    const s = String(term).trim();
-    const target = await resolveStreamId(env, s);
-    if (target.kind !== 'unknown') out.push(target);
-  }
-  return out;
+  const results = await Promise.all(
+    (terms || []).map(async (term) => {
+      const s = String(term).trim();
+      const target = await resolveStreamId(env, s);
+      return target.kind !== 'unknown' ? target : null;
+    }),
+  );
+  return results.filter(Boolean);
 }
 
 function contDec(c) {
@@ -148,9 +149,9 @@ function cursorDec(c) {
 }
 
 function canonicalStreamId(stream, uid) {
-  if (stream.kind === 'feed') return 'feed/' + stream.url;
-  if (stream.kind === 'label') return `user/${uid}/label/${stream.name}`;
-  return `user/${uid}/state/com.google/${stream.state}`;
+  if (stream.kind === 'feed') return 'feed/' + (stream.feedId || stream.url);
+  if (stream.kind === 'label') return `user/-/label/${stream.name}`;
+  return `user/-/state/com.google/${stream.state}`;
 }
 
 async function streamTitle(env, stream, uid, username) {
@@ -189,30 +190,23 @@ function itemToJson(r, uid, states, labels) {
   const href = r.url || '';
   const hexId = (Number(r.rowid ?? 0) || 0).toString(16).padStart(16, '0');
   const item = {
+    id: 'tag:google.com,2005:reader/item/' + hexId,
+    title: r.title,
+    published: r.published,
+    crawlTimeMsec: (r.crawl_time || Date.now()).toString(),
+    timestampUsec: r.timestamp_usec,
+    alternate: href ? [{ href }] : [],
+    canonical: [{ href }],
+    summary: { content: r.content || '' },
+    categories: cats,
     origin: {
-      streamId: 'feed/' + r.feed_url,
+      streamId: 'feed/' + (r.feed_id || r.rowid || r.feed_url),
       title: r.feed_title || '',
       htmlUrl: r.feed_html || '',
     },
-    updated: r.published,
-    id: 'tag:google.com,2005:reader/item/' + hexId,
-    guid: 'tag:google.com,2005:reader/item/' + hexId,
-    categories: cats,
-    title: r.title,
-    published: r.published,
-    timestampUsec: r.timestamp_usec,
-    crawlTimeMsec: String(r.crawl_time || Date.now()),
-    shortId: `${r.rowid ?? ''}`,
-    author: r.author || '',
-    canonical: [{ href }],
-    alternate: href ? [{ href, type: 'text/html' }] : [],
-    content: { direction: 'ltr', content: r.content || '' },
-    summary: { content: r.content || '' },
   };
-  if (r.enclosure) {
-    item.enclosure = { href: r.enclosure, type: '' };
-    item.enclosures = [{ href: r.enclosure, type: '' }];
-  }
+  if (r.enclosure) item.enclosure = [{ href: r.enclosure, type: '' }];
+  if (r.author) item.author = r.author;
   return item;
 }
 
@@ -237,7 +231,8 @@ function atomContents(out, selfHref) {
     s += `<gr:timestamp>${escapeHtml(it.timestampUsec)}</gr:timestamp>\n`;
     if (it.author) s += `<author><name>${escapeHtml(it.author)}</name></author>\n`;
     for (const c of it.categories || []) s += `<category term="${escapeHtml(c)}"/>\n`;
-    s += `<content type="html">${escapeHtml(it.content.content || '')}</content>\n`;
+    const body = (it.summary && it.summary.content) || (it.content && it.content.content) || '';
+    s += `<content type="html">${escapeHtml(body)}</content>\n`;
     s += `<gr:origin streamId="${escapeHtml(it.origin.streamId)}" title="${escapeHtml(it.origin.title || '')}" htmlUrl="${escapeHtml(it.origin.htmlUrl || '')}"/>\n`;
     s += `</entry>\n`;
   }
@@ -302,27 +297,18 @@ export async function userInfo(request, env, user) {
 }
 
 export async function unreadCount(request, env, user) {
-  const url = new URL(request.url);
-  const origin = url.origin;
-  const out = { max: 1000, unreadcounts: [] };
+  const out = { max: 0, unreadcounts: [] };
 
-  const feedRows = await feedUnread(env, user.id);
-  const urlById = {};
-  const feedIds = [...new Set(feedRows.map((r) => r.feed_id))];
-  for (let i = 0; i < feedIds.length; i += 90) {
-    const chunk = feedIds.slice(i, i + 400);
-    const ph = chunk.map(() => '?').join(',');
-    const feeds = await env.DB.prepare(
-      `SELECT id, url FROM feeds WHERE id IN (${ph})`,
-    )
-      .bind(...chunk)
-      .all();
-    for (const f of feeds.results || []) urlById[f.id] = f.url;
-  }
+  const [feedRows, labelRows, rl, starred] = await Promise.all([
+    feedUnread(env, user.id),
+    labelUnread(env, user.id),
+    readingListUnread(env, user.id),
+    starredUnread(env, user.id),
+  ]);
   for (const r of feedRows) {
     if (!r.c) continue;
     out.unreadcounts.push({
-      id: 'feed/' + (urlById[r.feed_id] || r.feed_id),
+      id: 'feed/' + (r.feed_id || r.feed_url),
       count: r.c,
       newestItemTimestampUsec: String((r.m || 0) * 1000000),
       updated: r.m,
@@ -331,10 +317,10 @@ export async function unreadCount(request, env, user) {
     });
   }
 
-  for (const r of await labelUnread(env, user.id)) {
+  for (const r of labelRows) {
     if (!r.c) continue;
     out.unreadcounts.push({
-      id: `user/${user.id}/label/${r.name}`,
+      id: `user/-/label/${r.name}`,
       count: r.c,
       newestItemTimestampUsec: String((r.m || 0) * 1000000),
       updated: r.m,
@@ -343,19 +329,18 @@ export async function unreadCount(request, env, user) {
     });
   }
 
-  const rl = await readingListUnread(env, user.id);
   out.unreadcounts.unshift({
-    id: `user/${user.id}/state/com.google/reading-list`,
+    id: 'user/-/state/com.google/reading-list',
     count: rl ? rl.c : 0,
     newestItemTimestampUsec: String((rl && rl.m ? rl.m : 0) * 1000000),
     updated: rl ? rl.m : 0,
     freshness: 1,
   });
+  out.max = rl ? rl.c : 0;
 
-  const starred = await starredUnread(env, user.id);
   if (starred > 0) {
     out.unreadcounts.push({
-      id: `user/${user.id}/state/com.google/starred`,
+      id: 'user/-/state/com.google/starred',
       count: starred,
       newestItemTimestampUsec: '0',
       freshness: 1,
@@ -381,10 +366,10 @@ export async function subscriptionList(request, env, user) {
     subscriptions: sorted.map((s, i) => {
       const title = s.custom_title || s.feed_title || s.feed_url;
       return {
-        id: 'feed/' + s.feed_url,
+        id: 'feed/' + s.feed_id,
         title,
         categories: (s.labels || []).map((l) => ({
-          id: `user/${user.id}/label/${l}`,
+          id: `user/-/label/${l}`,
           label: l,
         })),
         sortid: 'A' + String(i).padStart(7, '0'),
@@ -393,7 +378,7 @@ export async function subscriptionList(request, env, user) {
         iconUrl: iconUrl(origin, s.feed_url),
         url: s.feed_url,
         origin: {
-          streamId: 'feed/' + s.feed_url,
+          streamId: 'feed/' + s.feed_id,
           title,
           htmlUrl: s.feed_html || s.feed_url || '',
           url: s.feed_url,
@@ -430,7 +415,7 @@ export async function subscriptionQuickadd(request, env, user) {
   return json({
     numResults: 1,
     query: feed.url || q,
-    streamId: 'feed/' + (feed.url || q),
+    streamId: 'feed/' + (feed.id || feed.url || q),
     feedId: '',
     interrupted: false,
   });
@@ -440,19 +425,21 @@ export async function subscriptionEdit(request, env, user) {
   const form = await readForm(request);
   const ac = form.get('ac') || 'subscribe';
   let s = form.get('s') || form.get('url') || '';
-  if (s.startsWith('feed/http')) s = s.slice(5);
+  if (s.startsWith('feed/')) s = s.slice(5);
   const t = form.get('t') || '';
   const labelsToAdd = form.getAll('add').map(stripLabel).filter(Boolean);
   const labelsToRemove = form.getAll('r').map(stripLabel).filter(Boolean);
+  const lookupFeed = (ref) =>
+    /^\d+$/.test(ref) ? getFeedById(env, Number(ref)) : getFeedByUrl(env, ref);
 
   if (ac === 'unsubscribe' || ac === 'remove' || ac === 'unsub' || ac === 'delete') {
-    const feed = await getFeedByUrl(env, s);
+    const feed = await lookupFeed(s);
     if (feed) await removeSubscription(env, user.id, feed.id);
     return text('OK');
   }
   if (!s) return text('OK');
 
-  let feed = await getFeedByUrl(env, s);
+  let feed = await lookupFeed(s);
   if (!feed) {
     const res = await fetchAndStoreFeed(env, { url: s, id: 0, etag: '', updated: 0, title: t });
     if (res.error || !res.feedId) return text('OK');
@@ -478,13 +465,10 @@ export async function tagList(request, env, user) {
     ['user/-/state/com.google/broadcast', 'A0000003'],
     ['user/-/state/com.google/kept-unread', 'A0000004'],
   ];
-  const tags = specials.map(([id, sortid]) => ({
-    id: id.replace('user/-', `user/${user.id}`),
-    sortid,
-  }));
+  const tags = specials.map(([id, sortid]) => ({ id, sortid }));
   const labels = await listTags(env, user.id);
   labels.forEach((l, i) => {
-    tags.push({ id: `user/${user.id}/label/${l.name}`, sortid: 'B' + String(i).padStart(7, '0') });
+    tags.push({ id: `user/-/label/${l.name}`, sortid: 'B' + String(i).padStart(7, '0') });
   });
   return json({ tags });
 }
@@ -558,7 +542,7 @@ export async function friends(request, env, user) {
         p: '',
         contactId: '-1',
         flags: 1,
-        stream: `user/${user.id}/state/com.google/broadcast`,
+        stream: 'user/-/state/com.google/broadcast',
         hasSharedItemsOnProfile: false,
         profileIds: [String(user.id)],
         userIds: [String(user.id)],
@@ -583,6 +567,17 @@ export async function streamContents(request, env, user) {
     token = decodeURIComponentSafe(restRaw);
   }
 
+  // GReader-compatible clients (e.g. Newsboat's FeedHQ backend) fetch
+  // articles via /reader/atom/<stream?n=.. in Atom XML form.
+  const atomIdx = raw.indexOf('/reader/atom/');
+  if (!token && atomIdx !== -1) {
+    let restRaw = raw.slice(atomIdx + '/reader/atom/'.length);
+    const qi = restRaw.indexOf('?');
+    if (qi !== -1) restRaw = restRaw.slice(0, qi);
+    token = decodeURIComponentSafe(restRaw);
+    url.searchParams.set('output', 'atom');
+  }
+
   if (url.searchParams.get('s')) {
     token = url.searchParams.get('s').replace(/^user\/[^/]+\//, 'user/-/');
   }
@@ -594,13 +589,17 @@ export async function streamContents(request, env, user) {
   }
 
   const stream = await resolveStreamId(env, token);
+  const [xtResolved, itResolved] = await Promise.all([
+    resolveStreamIds(env, url.searchParams.getAll('xt')),
+    resolveStreamIds(env, url.searchParams.getAll('it')),
+  ]);
   const opts = {
     order: url.searchParams.get('r') || '',
     limit: clampInt(url.searchParams.get('n'), 20, 1, 1000),
     offset: contDec(url.searchParams.get('c')),
     cursor: cursorDec(url.searchParams.get('c')),
-    xtResolved: await resolveStreamIds(env, url.searchParams.getAll('xt')),
-    itResolved: await resolveStreamIds(env, url.searchParams.getAll('it')),
+    xtResolved,
+    itResolved,
     ot: url.searchParams.get('ot') ? parseInt(url.searchParams.get('ot'), 10) : null,
     nt: url.searchParams.get('nt') ? parseInt(url.searchParams.get('nt'), 10) : null,
   };
@@ -616,8 +615,10 @@ export async function streamContents(request, env, user) {
 
   if (stream.kind !== 'unknown') {
     const { rows, hasMore } = await getItemsStream(env, user.id, stream, opts);
-    const states = await getStatesForItems(env, user.id, rows.map((r) => r.id));
-    const labels = await getLabelsForItems(env, user.id, rows.map((r) => r.id));
+    const [states, labels] = await Promise.all([
+      getStatesForItems(env, user.id, rows.map((r) => r.id)),
+      getLabelsForItems(env, user.id, rows.map((r) => r.id)),
+    ]);
     out.items = rows.map((r) => itemToJson(r, user.id, states, labels));
     if (hasMore && rows.length) {
       const last = rows[rows.length - 1];
@@ -635,14 +636,18 @@ export async function streamItemsIds(request, env, user) {
   const s = url.searchParams.get('s') || '';
   if (!s) return json({ itemRefs: [] });
   const stream = await resolveStreamId(env, s);
+  const [xtResolved, itResolved] = await Promise.all([
+    resolveStreamIds(env, url.searchParams.getAll('xt')),
+    resolveStreamIds(env, url.searchParams.getAll('it')),
+  ]);
   const opts = {
     order: url.searchParams.get('r') || '',
     limit: clampInt(url.searchParams.get('n'), 20, 1, 5000),
     offset: contDec(url.searchParams.get('c')),
     cursor: cursorDec(url.searchParams.get('c')),
     refsOnly: true,
-    xtResolved: await resolveStreamIds(env, url.searchParams.getAll('xt')),
-    itResolved: await resolveStreamIds(env, url.searchParams.getAll('it')),
+    xtResolved,
+    itResolved,
     ot: url.searchParams.get('ot') ? parseInt(url.searchParams.get('ot'), 10) : null,
     nt: url.searchParams.get('nt') ? parseInt(url.searchParams.get('nt'), 10) : null,
   };
@@ -651,7 +656,9 @@ export async function streamItemsIds(request, env, user) {
   if (stream.kind !== 'unknown') {
     const opts2 = withDirect ? { ...opts, refsOnly: false } : opts;
     const { rows, hasMore } = await getItemsStream(env, user.id, stream, opts2);
-    const states = withDirect ? await getStatesForItems(env, user.id, rows.map((r) => r.id)) : null;
+    const states = withDirect
+      ? await getStatesForItems(env, user.id, rows.map((r) => r.id))
+      : null;
     out.itemRefs = rows.map((r) => {
       const ref = {
         id: String(Number(r.rowid ?? 0) || 0),
@@ -659,7 +666,7 @@ export async function streamItemsIds(request, env, user) {
       };
       if (withDirect) {
         const st = states[r.id] || new Set();
-        const ds = ['user/-/state/com.google/reading-list', `feed/${r.feed_url}`];
+        const ds = ['user/-/state/com.google/reading-list', `feed/${r.feed_id}`];
         if (st.has('read')) ds.push('user/-/state/com.google/read');
         if (st.has('starred')) ds.push('user/-/state/com.google/starred');
         ref.directStreamIds = ds;
@@ -683,10 +690,16 @@ export async function streamItemsContents(request, env, user) {
     ids = form.getAll('i');
   }
   if (!ids.length) return json({ items: [] });
-  const rows = await getItemsByIds(env, user.id, ids);
-  const states = await getStatesForItems(env, user.id, ids);
-  const labels = await getLabelsForItems(env, user.id, ids);
-  return json({ items: rows.map((r) => itemToJson(r, user.id, states, labels)) });
+  const [rows, states, labels] = await Promise.all([
+    getItemsByIds(env, user.id, ids),
+    getStatesForItems(env, user.id, ids),
+    getLabelsForItems(env, user.id, ids),
+  ]);
+  return json({
+    id: 'user/-/state/com.google/reading-list',
+    updated: now(),
+    items: rows.map((r) => itemToJson(r, user.id, states, labels)),
+  });
 }
 
 export async function streamItemsCount(request, env, user) {

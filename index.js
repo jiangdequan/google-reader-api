@@ -73,6 +73,10 @@ async function route(request, env, ctx) {
     return text('OK');
   }
 
+  if (path.startsWith('/reader/atom/')) {
+    return api.streamContents(request, env, user);
+  }
+
   if (!path.startsWith(GREADER + '/')) {
     return json({ error: 'not found', path }, 404);
   }
