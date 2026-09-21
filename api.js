@@ -427,7 +427,9 @@ export async function subscriptionEdit(request, env, user) {
   let s = form.get('s') || form.get('url') || '';
   if (s.startsWith('feed/')) s = s.slice(5);
   const t = form.get('t') || '';
-  const labelsToAdd = form.getAll('add').map(stripLabel).filter(Boolean);
+  const labelsToAdd = [...form.getAll('add'), ...form.getAll('a')]
+    .map(stripLabel)
+    .filter(Boolean);
   const labelsToRemove = form.getAll('r').map(stripLabel).filter(Boolean);
   const lookupFeed = (ref) =>
     /^\d+$/.test(ref) ? getFeedById(env, Number(ref)) : getFeedByUrl(env, ref);
