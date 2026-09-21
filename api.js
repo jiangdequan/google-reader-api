@@ -422,15 +422,17 @@ export async function subscriptionQuickadd(request, env, user) {
 }
 
 export async function subscriptionEdit(request, env, user) {
+  const url = new URL(request.url);
   const form = await readForm(request);
-  const ac = form.get('ac') || 'subscribe';
-  let s = form.get('s') || form.get('url') || '';
+  const pick = (name) => form.get(name) || url.searchParams.get(name);
+  const pickAll = (...names) =>
+    names.flatMap((name) => [...form.getAll(name), ...url.searchParams.getAll(name)]);
+  const ac = pick('ac') || 'subscribe';
+  let s = pick('s') || pick('url') || '';
   if (s.startsWith('feed/')) s = s.slice(5);
-  const t = form.get('t') || '';
-  const labelsToAdd = [...form.getAll('add'), ...form.getAll('a')]
-    .map(stripLabel)
-    .filter(Boolean);
-  const labelsToRemove = form.getAll('r').map(stripLabel).filter(Boolean);
+  const t = pick('t') || '';
+  const labelsToAdd = [...new Set(pickAll('add', 'a').map(stripLabel).filter(Boolean))];
+  const labelsToRemove = [...new Set(pickAll('r', 'remove').map(stripLabel).filter(Boolean))];
   const lookupFeed = (ref) =>
     /^\d+$/.test(ref) ? getFeedById(env, Number(ref)) : getFeedByUrl(env, ref);
 
@@ -508,9 +510,10 @@ export async function markAllAsRead(request, env, user) {
 }
 
 export async function renameTag(request, env, user) {
+  const url = new URL(request.url);
   const form = await readForm(request);
-  const s = form.get('s') || form.get('t') || '';
-  const dest = form.get('dest') || '';
+  const s = form.get('s') || form.get('t') || url.searchParams.get('s') || url.searchParams.get('t') || '';
+  const dest = form.get('dest') || url.searchParams.get('dest') || '';
   const oldName = stripLabel(s);
   const newName = stripLabel(dest);
   if (!oldName || !newName) return text('OK');
@@ -519,8 +522,9 @@ export async function renameTag(request, env, user) {
 }
 
 export async function disableTag(request, env, user) {
+  const url = new URL(request.url);
   const form = await readForm(request);
-  const s = form.get('s') || form.get('t') || '';
+  const s = form.get('s') || form.get('t') || url.searchParams.get('s') || url.searchParams.get('t') || '';
   const name = stripLabel(s);
   if (!name) return text('OK');
   await dbDisableTag(env, user.id, name);
