@@ -149,7 +149,7 @@ function cursorDec(c) {
 }
 
 function canonicalStreamId(stream, uid) {
-  if (stream.kind === 'feed') return 'feed/' + (stream.feedId || stream.url);
+  if (stream.kind === 'feed') return 'feed/' + stream.url;
   if (stream.kind === 'label') return `user/-/label/${stream.name}`;
   return `user/-/state/com.google/${stream.state}`;
 }
@@ -200,7 +200,7 @@ function itemToJson(r, uid, states, labels) {
     summary: { content: r.content || '' },
     categories: cats,
     origin: {
-      streamId: 'feed/' + (r.feed_id || r.rowid || r.feed_url),
+      streamId: 'feed/' + r.feed_url,
       title: r.feed_title || '',
       htmlUrl: r.feed_html || '',
     },
@@ -308,7 +308,7 @@ export async function unreadCount(request, env, user) {
   for (const r of feedRows) {
     if (!r.c) continue;
     out.unreadcounts.push({
-      id: 'feed/' + (r.feed_id || r.feed_url),
+      id: 'feed/' + r.feed_url,
       count: r.c,
       newestItemTimestampUsec: String((r.m || 0) * 1000000),
       updated: r.m,
@@ -366,7 +366,7 @@ export async function subscriptionList(request, env, user) {
     subscriptions: sorted.map((s, i) => {
       const title = s.custom_title || s.feed_title || s.feed_url;
       return {
-        id: 'feed/' + s.feed_id,
+        id: 'feed/' + s.feed_url,
         title,
         categories: (s.labels || []).map((l) => ({
           id: `user/-/label/${l}`,
@@ -378,7 +378,7 @@ export async function subscriptionList(request, env, user) {
         iconUrl: iconUrl(origin, s.feed_url),
         url: s.feed_url,
         origin: {
-          streamId: 'feed/' + s.feed_id,
+          streamId: 'feed/' + s.feed_url,
           title,
           htmlUrl: s.feed_html || s.feed_url || '',
           url: s.feed_url,
@@ -415,7 +415,7 @@ export async function subscriptionQuickadd(request, env, user) {
   return json({
     numResults: 1,
     query: feed.url || q,
-    streamId: 'feed/' + (feed.id || feed.url || q),
+    streamId: 'feed/' + (feed.url || q),
     feedId: '',
     interrupted: false,
   });
@@ -672,7 +672,7 @@ export async function streamItemsIds(request, env, user) {
       };
       if (withDirect) {
         const st = states[r.id] || new Set();
-        const ds = ['user/-/state/com.google/reading-list', `feed/${r.feed_id}`];
+        const ds = ['user/-/state/com.google/reading-list', `feed/${r.feed_url}`];
         if (st.has('read')) ds.push('user/-/state/com.google/read');
         if (st.has('starred')) ds.push('user/-/state/com.google/starred');
         ref.directStreamIds = ds;
