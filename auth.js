@@ -1,4 +1,4 @@
-import { getUserById, verifyPassword } from './db.js';
+import { getUserById, verifyPassword } from './db/users.js';
 import { b64urlEncode, b64urlDecode, hmacHex, text } from './util.js';
 
 const TOKEN_TTL = 30 * 24 * 3600;

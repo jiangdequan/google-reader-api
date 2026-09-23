@@ -1,8 +1,9 @@
-import { ensureDefaultUsers, ensureSchema } from './db.js';
+import { ensureSchema } from './db/schema.js';
+import { ensureDefaultUsers } from './db/users.js';
 import { authenticateRequest, clientLogin } from './auth.js';
 import { json, text } from './util.js';
 import { runSync } from './sync.js';
-import * as api from './api.js';
+import * as api from './api/index.js';
 
 const GREADER = '/reader/api/0';
 

@@ -1,10 +1,5 @@
-import {
-  insertFeed,
-  insertNewItems,
-  pruneFeed,
-  staleFeeds,
-  updateFetchMeta,
-} from './db.js';
+import { insertFeed, staleFeeds, updateFetchMeta } from './db/feeds.js';
+import { insertNewItems, pruneFeed } from './db/items.js';
 import { now } from './util.js';
 import { fetchFeed } from './feedfetch.js';
 
@@ -43,20 +38,6 @@ export async function runSync(env) {
   const feeds = await staleFeeds(env, since, limit);
   let done = 0;
   for (const f of feeds) {
-    const lockKey = 'lock:' + (f.id || f.url);
-    if (!env.KV) continue;
-    let locked = null;
-    try {
-      locked = await env.KV.get(lockKey);
-    } catch (e) {
-      locked = null;
-    }
-    if (locked) continue;
-    try {
-      await env.KV.put(lockKey, '1', { expirationTtl: 600 });
-    } catch (e) {
-      /* ignore */
-    }
     try {
       await fetchAndStoreFeed(env, {
         id: f.id,
@@ -68,12 +49,6 @@ export async function runSync(env) {
       done++;
     } catch (e) {
       console.error('feed sync error', f.url, e);
-    } finally {
-      try {
-        await env.KV.delete(lockKey);
-      } catch (e) {
-        /* ignore */
-      }
     }
   }
   return done;
