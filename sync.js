@@ -8,14 +8,17 @@ import { fetchFeed } from './feedfetch.js';
 // 抓取单个 feed 并写入存储。返回 { feedId, url, added } 表示正常入库,
 // { error } 表示抓取/解析失败, { unchanged } 表示服务端 304 无更新。
 export async function fetchAndStoreFeed(env, feed) {
+  console.log('fetch feed', feed.url);
   const res = await fetchFeed(env, feed);
   // 抓取失败:记录 fetch_error,方便 readme/stale 判断,不再继续。
   if (res.error) {
+    console.error('fetch feed error', feed.url, res.error);
     if (feed.id) await updateFetchMeta(env, feed.id, { error: res.error });
     return { feedId: feed.id || 0, url: feed.url || '', error: res.error };
   }
   // 304 Not Modified:仅刷新 last_fetched,说明 feed 无新内容。
   if (res.unchanged) {
+    console.log('feed unchanged', feed.url);
     if (feed.id) await updateFetchMeta(env, feed.id, {});
     return { feedId: feed.id || 0, url: feed.url || '', unchanged: true };
   }

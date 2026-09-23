@@ -59,6 +59,7 @@ export async function fetchFeed(env, feed) {
     timer = t;
     resp = await fetch(url, { headers, redirect: 'follow', signal: t.signal });
   } catch (e) {
+    console.error('fetch feed error', url, e);
     return { error: String((e && e.message) || e) };
   } finally {
     if (timer) timer.clear();
@@ -95,6 +96,7 @@ export async function fetchFeed(env, feed) {
           if (parsed) finalUrl = discovered;
         }
       } catch (e) {
+        console.error('fetch discovered feed error', discovered, e);
         /* ignore */
       } finally {
         if (t2) t2.clear();
@@ -104,6 +106,7 @@ export async function fetchFeed(env, feed) {
 
   if (!parsed) return { error: 'not a feed' };
 
+  console.log('fetch feed ok', finalUrl, parsed.items.length, 'items');
   return {
     feed: {
       url,
