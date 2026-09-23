@@ -1,12 +1,11 @@
 # =============================================================================
 # Googlereaderapi — wrangler 配置模板
 #
-# 用法:复制为 wrangler.toml,填入真实的 KV/D1 ID 与保密变量后再部署:
+# 用法:复制为 wrangler.toml,填入真实的 D1 ID 与保密变量后再部署:
 #   cp wrangler.sample.toml wrangler.toml
 #
 # 需要替换的占位:
-#   - KV / D1 的命名空间 id:分别由 `npx wrangler kv namespace create KV` 和
-#     `npx wrangler d1 create googlereaderapi-db` 命令的输出给出。
+#   - D1 的命名空间 id:由 `npx wrangler d1 create googlereaderapi-db` 命令的输出给出。
 #   - GR_USERS:英文逗号分隔多用户,每项 `用户名:密码`。
 #   - JWT_SECRET:用来签登录态令牌的密钥,务必换成长随机串
 #     (如 `openssl rand -base64 32`)。
@@ -24,18 +23,14 @@ enabled = true
 crons = ["*/30 * * * *"]
 
 # ---------------------------------------------------------------------------
-# 本地开发/调试:推荐使用 `--local`,直接用本地 D1/KV,无需填真实的 id。
+# 本地开发/调试:推荐使用 `--local`,直接用本地 D1,无需填真实的 id。
 # 下边两个 env 块仅在部署指定环境时生效(`--env staging` / `--env production`)。
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # staging 环境 —— 部署验证用。
-# key_namespaces:KV 目前已被代码移除,仅作兼容保留,可按需删除。
 # ---------------------------------------------------------------------------
 [env.staging]
-kv_namespaces = [
-  { binding = "KV", id = "00000000-0000-0000-0000-000000000000" }
-]
 d1_databases = [
   { binding = "DB", database_name = "googlereaderapi-db", database_id = "00000000-0000-0000-0000-000000000000" }
 ]
@@ -59,9 +54,6 @@ MAX_ITEM_AGE_DAYS = 90
 # ---------------------------------------------------------------------------
 [env.production]
 name = "googlereaderapi"
-kv_namespaces = [
-  { binding = "KV", id = "00000000-0000-0000-0000-000000000000" }
-]
 d1_databases = [
   { binding = "DB", database_name = "googlereaderapi-db", database_id = "00000000-0000-0000-0000-000000000000" }
 ]

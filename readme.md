@@ -2,7 +2,7 @@
 
 基于 Cloudflare Workers 的自建 **Google Reader API** 后端服务。任何支持自建 Google Reader API 的客户端都可以接入，例如 **Reeder、Fiery Feeds、FeedMe、NewsFlash、FreshRSS 兼容客户端** 等。
 
-- 存储：Cloudflare **D1**（SQLite）+ **KV**（同步锁 / favicon 缓存）
+- 存储：Cloudflare **D1**（SQLite）
 - 定时抓取：Cloudflare **Cron Triggers**
 - 支持 RSS 2.0 / Atom / RSS 1.0（RDF）/ JSON Feed，自动识别网页里的 `<link rel="alternate">`
 - 认证：HTTP Basic、ClientLogin Token、`GoogleLogin auth=`、`?auth=` / `?T=`
@@ -30,7 +30,7 @@ src/googlereaderapi/
 ## 快速开始（本地）
 
 ```bash
-# 1. 启动本地服务（--env staging，--local 使用本地 D1/KV，自动建表、自动创建默认用户）
+# 1. 启动本地服务（--env staging，--local 使用本地 D1，自动建表、自动创建默认用户）
 npm run start:gr
 # 也可: npx wrangler dev --local --env staging src/googlereaderapi/index.js -c src/googlereaderapi/wrangler.toml
 
@@ -40,7 +40,7 @@ curl "http://localhost:8788/reader/api/0/user-info?output=json" -u admin:changem
 
 本地默认账号：`admin` / `changeme123`（在 `wrangler.toml` 的 `[env.staging.vars].GR_USERS` 中配置）。
 
-> 本地 D1/KV 数据存储在 `.wrangler/` 下（已 gitignore）。miniflare 会按配置内容生成持久化目录的哈希，**修改 `wrangler.toml` 或切换 `--env` 会导致本地数据库重置**，属正常现象，重新订阅即可。
+> 本地 D1 数据存储在 `.wrangler/` 下（已 gitignore）。miniflare 会按配置内容生成持久化目录的哈希，**修改 `wrangler.toml` 或切换 `--env` 会导致本地数据库重置**，属正常现象，重新订阅即可。
 
 ### 本地手动执行建表 / 查看本地数据
 
@@ -51,14 +51,13 @@ npx wrangler d1 execute googlereaderapi-db --local --env staging --command "SELE
 
 ## 部署到生产
 
-### 1. 创建 D1 数据库和 KV 命名空间
+### 1. 创建 D1 数据库
 
 ```bash
 npx wrangler d1 create googlereaderapi-db
-npx wrangler kv namespace create KV
 ```
 
-把输出中的 `database_id` 和 KV `id` 填入 `wrangler.toml`，替换占位符 `00000000-0000-0000-0000-000000000000`。
+把输出中的 `database_id` 填入 `wrangler.toml`，替换占位符 `00000000-0000-0000-0000-000000000000`。
 
 ### 2. 修改配置
 
@@ -70,7 +69,7 @@ GR_USERS = "你的用户名:你的强密码"      # 多个用户用英文逗号�
 JWT_SECRET = "一段足够长的随机字符串"    # 用于签发登录 token
 ```
 
-`[env.production]` 下的 `kv_namespaces`、`d1_databases` 中的 `id` 也会在你创建资源后自动填入占位值，部署前确认它们是生产环境的真实资源 id。
+`[env.production]` 下的 `d1_databases` 中的 `id` 也会在你创建资源后自动填入占位值，部署前确认它们是生产环境的真实资源 id。
 
 ### 3. 部署
 
@@ -94,7 +93,7 @@ npm run deploy:gr
 
 ### feed 图标
 
-订阅列表里的 `iconUrl` 指向 Worker 自带的 `/favicon?host=xxx` 代理，由 Worker 从 Cloudflare 边缘抓取并缓存到 KV，客户端无需直连 Google/DuckDuckGo。
+订阅列表里的 `iconUrl` 指向 Worker 自带的 `/favicon?host=xxx` 代理，由 Worker 从 Cloudflare 边缘抓取并缓存在边缘（Cache API），客户端无需直连 Google/DuckDuckGo。
 
 ## 已实现的 API
 
@@ -124,7 +123,7 @@ npm run deploy:gr
 | `/reader/subscriptions/export` | GET | 导出 OPML |
 | `/reader/subscriptions/import` | POST | 导入 OPML |
 | `/reader/api/0/sync` | POST | 手动触发一次抓取同步 |
-| `/favicon?host=xxx` | GET | favicon 代理（KV 缓存） |
+| `/favicon?host=xxx` | GET | favicon 代理（边缘缓存） |
 
 ### 常用 stream ID
 
