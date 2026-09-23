@@ -1,32 +1,75 @@
+# =============================================================================
+# Googlereaderapi — wrangler 配置模板
+#
+# 用法:复制为 wrangler.toml,填入真实的 KV/D1 ID 与保密变量后再部署:
+#   cp wrangler.sample.toml wrangler.toml
+#
+# 需要替换的占位:
+#   - KV / D1 的命名空间 id:分别由 `npx wrangler kv namespace create KV` 和
+#     `npx wrangler d1 create googlereaderapi-db` 命令的输出给出。
+#   - GR_USERS:英文逗号分隔多用户,每项 `用户名:密码`。
+#   - JWT_SECRET:用来签登录态令牌的密钥,务必换成长随机串
+#     (如 `openssl rand -base64 32`)。
+# =============================================================================
 name = "googlereaderapi"
 main = "index.js"
 compatibility_date = "2026-09-15"
 
+[observability]
+enabled = true
+
+# 定时抓取节奏。触发频率不必高于 SYNC_INTERVAL_MIN:仓库默认 `*/30`(每 30 分钟),
+# 配合生产环境 SYNC_INTERVAL_MIN=60,可保证每个 feed 每小时恰好同步一次。
+[triggers]
+crons = ["*/30 * * * *"]
+
+# ---------------------------------------------------------------------------
+# 本地开发/调试:推荐使用 `--local`,直接用本地 D1/KV,无需填真实的 id。
+# 下边两个 env 块仅在部署指定环境时生效(`--env staging` / `--env production`)。
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# staging 环境 —— 部署验证用。
+# key_namespaces:KV 目前已被代码移除,仅作兼容保留,可按需删除。
+# ---------------------------------------------------------------------------
+[env.staging]
 kv_namespaces = [
-  # Used for sync locks + favicon cache
   { binding = "KV", id = "00000000-0000-0000-0000-000000000000" }
 ]
-
 d1_databases = [
   { binding = "DB", database_name = "googlereaderapi-db", database_id = "00000000-0000-0000-0000-000000000000" }
 ]
 
-[observability]
-enabled = true
-
-[vars]
-# Comma-separated users: `username:password`. Change before deploying!
+[env.staging.vars]
+# 逗号分隔的用户列表,每项格式 `用户名:密码`
 GR_USERS = "admin:changeme123"
-# Secret used to sign authentication tokens. Change before deploying!
+# 登录态令牌的签名密钥,部署前请改成随机长串
 JWT_SECRET = "change-me-to-a-long-random-string"
-# How often (minutes) to refresh feeds via the cron trigger
+# 同步间隔(分钟):一个 feed 超过该时长未抓取即视为“过期”,等待下次 cron 抓取
 SYNC_INTERVAL_MIN = 15
-# Max feeds processed per cron run (Workers subrequest limit)
+# 单次 cron 最多抓取的 feed 数,用于控制 Worker 的 subrequest 配额
 MAX_FETCH_PER_CRON = 20
-# Max items kept per feed (older items pruned)
+# 每个 feed 最多保留的文章数,超出部分裁剪
 MAX_ITEMS_PER_FEED = 3000
-# Skip entries older than this many days on insert (0 disables; dates unknown kept)
+# 跳过早于该天数、且带发布日期的文章(0 表示关闭,无日期条目始终保留)
 MAX_ITEM_AGE_DAYS = 90
 
-[triggers]
-crons = ["*/15 * * * *"]
+# ---------------------------------------------------------------------------
+# 生产环境 —— `--env production` 部署,填入真实 id 与密钥。
+# ---------------------------------------------------------------------------
+[env.production]
+name = "googlereaderapi"
+kv_namespaces = [
+  { binding = "KV", id = "00000000-0000-0000-0000-000000000000" }
+]
+d1_databases = [
+  { binding = "DB", database_name = "googlereaderapi-db", database_id = "00000000-0000-0000-0000-000000000000" }
+]
+
+[env.production.vars]
+GR_USERS = "admin:changeme123"
+JWT_SECRET = "change-me-to-a-long-random-string"
+SYNC_INTERVAL_MIN = 60
+MAX_FETCH_PER_CRON = 20
+MAX_ITEMS_PER_FEED = 3000
+MAX_ITEM_AGE_DAYS = 90
