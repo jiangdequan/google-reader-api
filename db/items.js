@@ -26,89 +26,91 @@ export async function resolveStreamId(env, token) {
 }
 
 export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itResolved = []) {
-  const conds = [];
-  const args = [];
-  const add = (sql, ...a) => {
-    conds.push(sql);
-    args.push(...a);
-  };
-  if (stream.kind === 'feed') {
-    add('i.feed_id = ?', stream.feedId);
-  } else if (stream.kind === 'label') {
-    add(
-      `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags t ON t.id=st.tag_id
-                WHERE st.user_id=? AND st.feed_id=i.feed_id AND t.name=?)
-        OR EXISTS (SELECT 1 FROM item_tags il WHERE il.user_id=? AND il.item_id=i.id AND il.label=?))`,
-      userId,
-      stream.name,
-      userId,
-      stream.name,
-    );
-  } else if (stream.kind === 'state') {
-    const st = stream.state;
-    if (st === 'reading-list' || st === 'unread') {
-      add(
-        'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
-        userId,
-      );
-    } else if (st === 'starred' || st === 'broadcast' || st === 'kept-unread' || st === 'read') {
-      add(
-        'EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state=?)',
-        userId,
-        st,
-      );
+  const labelClause = (name, tagAlias = 't', itemAlias = 'il') => ({
+    sql: `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags ${tagAlias} ON ${tagAlias}.id=st.tag_id
+                   WHERE st.user_id=? AND st.feed_id=i.feed_id AND ${tagAlias}.name=?)
+           OR EXISTS (SELECT 1 FROM item_tags ${itemAlias} WHERE ${itemAlias}.user_id=? AND ${itemAlias}.item_id=i.id AND ${itemAlias}.label=?))`,
+    args: [userId, name, userId, name],
+  });
+
+  const stateClause = (state, alias = 's', negate = false) => {
+    if (state === 'reading-list' || state === 'unread') {
+      return {
+        sql: 'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
+        args: [userId],
+      };
     }
+    if (state === 'read' || state === 'starred' || state === 'broadcast' || state === 'kept-unread') {
+      return {
+        sql: `${negate ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM item_states ${alias} WHERE ${alias}.user_id=? AND ${alias}.item_id=i.id AND ${alias}.state=?)`,
+        args: [userId, state],
+      };
+    }
+    return null;
+  };
+
+  const feedClause = (feedId) => ({
+    sql: 'i.feed_id = ?',
+    args: [feedId],
+  });
+
+  const conditions = [];
+  const add = (condition) => {
+    if (condition) conditions.push(condition);
+  };
+
+  if (stream.kind === 'feed') {
+    add(feedClause(stream.feedId));
+  } else if (stream.kind === 'label') {
+    add(labelClause(stream.name));
+  } else if (stream.kind === 'state') {
+    add(stateClause(stream.state));
   }
+
   for (const x of xtResolved || []) {
     if (x.kind === 'feed' && x.feedId) {
-      add('i.feed_id <> ?', x.feedId);
+      add({ sql: 'i.feed_id <> ?', args: [x.feedId] });
     } else if (x.kind === 'label') {
-      add(
-        `NOT (EXISTS (SELECT 1 FROM subscription_tags st JOIN tags t ON t.id=st.tag_id
-                      WHERE st.user_id=? AND st.feed_id=i.feed_id AND t.name=?)
-           OR EXISTS (SELECT 1 FROM item_tags il WHERE il.user_id=? AND il.item_id=i.id AND il.label=?))`,
-        userId,
-        x.name,
-        userId,
-        x.name,
-      );
+      const clause = labelClause(x.name);
+      add({ sql: `NOT ${clause.sql}`, args: clause.args });
     } else if (x.kind === 'state') {
-      const st = x.state;
-      if (st === 'read' || st === 'starred' || st === 'broadcast' || st === 'kept-unread') {
-        add(
-          'NOT EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state=?)',
-          userId,
-          st,
-        );
+      const clause = stateClause(x.state, 's', true);
+      if (clause && !(x.state === 'reading-list' || x.state === 'unread')) {
+        add(clause);
       }
     }
   }
-  const inc = [];
-  const incArgs = [];
+
+  const includes = [];
   for (const t of itResolved || []) {
     if (t.kind === 'feed' && t.feedId) {
-      inc.push('EXISTS (SELECT 1 FROM items t2 WHERE t2.id = i.id AND t2.feed_id = ?)');
-      incArgs.push(t.feedId);
+      includes.push({
+        sql: 'EXISTS (SELECT 1 FROM items t2 WHERE t2.id = i.id AND t2.feed_id = ?)',
+        args: [t.feedId],
+      });
     } else if (t.kind === 'label') {
-      inc.push(
-        `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags tg ON tg.id=st.tag_id
-                  WHERE st.user_id=? AND st.feed_id=i.feed_id AND tg.name=?)
-          OR EXISTS (SELECT 1 FROM item_tags il2 WHERE il2.user_id=? AND il2.item_id=i.id AND il2.label=?))`,
-      );
-      incArgs.push(userId, t.name, userId, t.name);
+      includes.push(labelClause(t.name, 'tg', 'il2'));
     } else if (t.kind === 'state') {
-      const st = t.state;
-      if (st === 'reading-list' || st === 'unread') continue;
-      if (st === 'read' || st === 'starred' || st === 'broadcast' || st === 'kept-unread') {
-        inc.push('EXISTS (SELECT 1 FROM item_states s2 WHERE s2.user_id=? AND s2.item_id=i.id AND s2.state=?)');
-        incArgs.push(userId, st);
+      const clause = stateClause(t.state, 's2');
+      if (clause && !(t.state === 'reading-list' || t.state === 'unread')) {
+        includes.push(clause);
       }
     }
   }
-  if (inc.length) add('(' + inc.join(' OR ') + ')', ...incArgs);
-  if (ot) add('i.published >= ?', ot);
-  if (nt) add('i.published <= ?', nt);
-  return { where: conds.length ? ' WHERE ' + conds.join(' AND ') : '', args };
+
+  if (includes.length) {
+    add({
+      sql: `(${includes.map((c) => c.sql).join(' OR ')})`,
+      args: includes.flatMap((c) => c.args),
+    });
+  }
+
+  if (ot) add({ sql: 'i.published >= ?', args: [ot] });
+  if (nt) add({ sql: 'i.published <= ?', args: [nt] });
+
+  const args = conditions.flatMap((c) => c.args);
+  const where = conditions.length ? ' WHERE ' + conditions.map((c) => c.sql).join(' AND ') : '';
+  return { where, args };
 }
 
 export async function getItemsStream(env, userId, stream, opts) {
