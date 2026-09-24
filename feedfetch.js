@@ -94,7 +94,6 @@ export async function fetchFeed(env, feed) {
         }
       } catch (e) {
         console.error('fetch discovered feed error', discovered, e);
-        /* ignore */
       } finally {
         if (t2) t2.clear();
       }

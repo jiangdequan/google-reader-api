@@ -10,7 +10,8 @@ import {
 import { detachLabel } from '../db/tags.js';
 import { getFeedById, getFeedByUrl } from '../db/feeds.js';
 import { ensureFeed } from '../sync.js';
-import { iconUrl, readForm, stripLabel } from './utils.js';
+import { iconUrl, readForm } from './http.js';
+import { stripLabel } from './stream-parser.js';
 
 export async function subscriptionList(request, env, user) {
   const url = new URL(request.url);

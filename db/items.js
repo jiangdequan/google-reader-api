@@ -387,7 +387,7 @@ export async function markStreamRead(env, userId, stream, tsUsec) {
   return ids.length;
 }
 
-export async function getItemsByIds(env, userId, ids) {
+export async function getItemsByIds(env, ids) {
   if (!ids.length) return [];
   const rowids = [];
   const idsLong = [];

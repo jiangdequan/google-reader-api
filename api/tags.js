@@ -1,7 +1,8 @@
 import { json, text } from '../util.js';
 import { disableTag as dbDisableTag, listTags, renameTag as dbRenameTag } from '../db/tags.js';
 import { markStreamRead, resolveStreamId } from '../db/items.js';
-import { applyTag, readForm, stripLabel } from './utils.js';
+import { readForm } from './http.js';
+import { applyTag, stripLabel } from './stream-parser.js';
 
 export async function tagList(request, env, user) {
   const specials = [
