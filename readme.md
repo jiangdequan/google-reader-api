@@ -6,50 +6,66 @@
 - 定时抓取：Cloudflare **Cron Triggers**
 - 支持 RSS 2.0 / Atom / RSS 1.0（RDF）/ JSON Feed，自动识别网页里的 `<link rel="alternate">`
 - 认证：HTTP Basic、ClientLogin Token、`GoogleLogin auth=`、`?auth=` / `?T=`
-- 无第三方依赖，全部代码自包含
+- 运行时零第三方依赖，代码自包含
 
 ## 目录结构
 
 ```
-src/googlereaderapi/
-├── index.js        # Worker 入口 + 路由 + CRON 处理
-├── api.js          # Google Reader API 各端点实现
-├── db.js           # D1 数据访问 + 建表
-├── auth.js         # ClientLogin / Token / Basic 认证
-├── feedfetch.js    # 抓取 + 网页 feed 自动发现
-├── feedparser.js   # RSS/Atom/RDF/JSON Feed 解析
-├── xml.js          # 轻量 XML 解析器（无依赖）
-├── opml.js         # OPML 导入/导出
-├── sync.js         # 定时/手动抓取同步
-├── util.js         # 工具函数
-├── schema.sql      # D1 表结构（可选，Worker 会自动建表）
-├── wrangler.toml   # Worker 配置
+.
+├── index.js            # Worker 入口 + 路由 + CRON 处理
+├── auth.js             # ClientLogin / Token / Basic 认证
+├── constants.js        # 集中常量（超时 / 上限 / 默认密钥）
+├── feedfetch.js        # 抓取 + 网页 feed 自动发现
+├── feedparser.js       # RSS/Atom/RDF/JSON Feed 解析
+├── xml.js              # 轻量 XML 解析器（无依赖）
+├── opml.js             # OPML 导入/导出
+├── streamid.js         # Reader 流 ID 语法：解析 / 序列化
+├── sync.js             # 定时/手动抓取同步
+├── util.js             # 工具函数
+├── api/                # API 端点实现（streams / subscriptions / tags / ...）
+├── db/                 # D1 数据访问 + 建表
+├── test/               # node:test 单元测试（npm test）
+├── schema.sql          # D1 表结构（可选，Worker 会自动建表）
+├── wrangler.sample.toml# 配置样例（占位 database_id）
+├── wrangler.toml       # 实际配置（本地从 sample 复制，已 gitignore）
+├── package.json        # 脚本与 devDependencies（wrangler / prettier）
 └── readme.md
 ```
 
 ## 快速开始（本地）
 
 ```bash
-# 1. 启动本地服务（--env staging，--local 使用本地 D1，自动建表、自动创建默认用户）
-npm run start:gr
-# 也可: npx wrangler dev --local --env staging src/googlereaderapi/index.js -c src/googlereaderapi/wrangler.toml
+# 0. 首次先装依赖（Node ≥ 18），并生成本地配置
+npm install
+cp wrangler.sample.toml wrangler.toml   # 若尚未存在，按需修改 database_id / GR_USERS
 
-# 2. 浏览器/curl 访问
-curl "http://localhost:8788/reader/api/0/user-info?output=json" -u admin:changeme123
+# 1. 启动本地服务（--env staging，使用本地 D1，自动建表、自动创建默认用户）
+npm run start:gr
+# 也可: npx wrangler dev --env staging
+
+# 2. 浏览器/curl 访问（wrangler 默认监听本地 8787 端口）
+curl "http://localhost:8787/reader/api/0/user-info?output=json" -u admin:changeme123
 ```
 
-本地默认账号：`admin` / `changeme123`（在 `wrangler.toml` 的 `[env.staging.vars].GR_USERS` 中配置）。
+本地默认账号：`admin` / `changeme123`（`wrangler.sample.toml` 的 `[env.staging.vars].GR_USERS` 中的配置，可按需在本地 `wrangler.toml` 修改）。
 
-> 本地 D1 数据存储在 `.wrangler/` 下（已 gitignore）。miniflare 会按配置内容生成持久化目录的哈希，**修改 `wrangler.toml` 或切换 `--env` 会导致本地数据库重置**，属正常现象，重新订阅即可。
+> 本地 D1 数据持久化在 `.wrangler/` 下（已 gitignore）。wrangler 按配置内容生成持久化目录，**修改 `wrangler.toml` 或切换 `--env` 会导致本地数据库重置**，属正常现象，重新订阅即可。
 
 ### 本地手动执行建表 / 查看本地数据
 
 ```bash
 npm run d1:gr                        # 执行 schema.sql（本地 D1）
-npx wrangler d1 execute googlereaderapi-db --local --env staging --command "SELECT 1" -c src/googlereaderapi/wrangler.toml
+npx wrangler d1 execute googlereaderapi-db --command "SELECT 1"
 ```
 
 ## 部署到生产
+
+### 0. 准备本地配置
+
+```bash
+cp wrangler.sample.toml wrangler.toml
+wrangler login       # 或设置 CLOUDFLARE_API_TOKEN 环境变量
+```
 
 ### 1. 创建 D1 数据库
 
@@ -57,11 +73,11 @@ npx wrangler d1 execute googlereaderapi-db --local --env staging --command "SELE
 npx wrangler d1 create googlereaderapi-db
 ```
 
-把输出中的 `database_id` 填入 `wrangler.toml`，替换占位符 `00000000-0000-0000-0000-000000000000`。
+把输出中的 `database_id` 填入 `wrangler.toml`（即 `wrangler.sample.toml` 中占位符 `00000000-0000-0000-0000-000000000000` 所在的位置）。
 
 ### 2. 修改配置
 
-在 `src/googlereaderapi/wrangler.toml` 的 `[env.production]` 中修改：
+在 `wrangler.toml` 的 `[env.production]` 中修改：
 
 ```toml
 [env.production.vars]
@@ -75,7 +91,7 @@ JWT_SECRET = "一段足够长的随机字符串"    # 用于签发登录 token
 
 ```bash
 npm run deploy:gr
-# 也可: npx wrangler deploy --env production src/googlereaderapi/index.js -c src/googlereaderapi/wrangler.toml
+# 也可: npx wrangler deploy --env production
 ```
 
 首次请求会自动建表；也可以用 `npm run d1:gr:remote` 手动对生产 D1 执行 `schema.sql`。
@@ -97,6 +113,8 @@ npm run deploy:gr
 
 ## 已实现的 API
 
+端点清单见下表；各接口的请求参数与响应字段详细定义见 [docs/api.md](docs/api.md)。
+
 | 端点                                     | 方法     | 说明                             |
 | ---------------------------------------- | -------- | -------------------------------- |
 | `/accounts/ClientLogin`                  | GET/POST | 账号密码换取 Auth token          |
@@ -113,6 +131,7 @@ npm run deploy:gr
 | `/reader/api/0/mark-all-as-read`         | POST     | 全部标记已读                     |
 | `/reader/api/0/unread-count`             | GET      | 未读数统计                       |
 | `/reader/api/0/stream/contents/{stream}` | GET      | 流内容（JSON / Atom）            |
+| `/reader/api/0/stream/details`           | GET      | 流详情                           |
 | `/reader/api/0/stream/items/ids`         | GET      | 流的条目 ID 列表                 |
 | `/reader/api/0/stream/items/contents`    | GET/POST | 指定条目详情                     |
 | `/reader/api/0/stream/items/count`       | GET      | 流的条目数                       |
@@ -156,13 +175,13 @@ curl -H "Authorization: GoogleLogin auth=<token>" "https://your-worker/reader/ap
 | 变量                 | 说明                                                          | 默认                |
 | -------------------- | ------------------------------------------------------------- | ------------------- |
 | `GR_USERS`           | `用户名:密码`，多个用逗号分隔                                 | `admin:changeme123` |
-| `JWT_SECRET`         | token 签名密钥，务必修改                                      | `change-me...`      |
+| `JWT_SECRET`         | token 签名密钥，务必修改                                      | `greader-secret`    |
 | `SYNC_INTERVAL_MIN`  | 抓取间隔（分钟）                                              | `15`                |
 | `MAX_FETCH_PER_CRON` | 每次 Cron 最多抓取的源数量                                    | `20`                |
 | `MAX_ITEMS_PER_FEED` | 每个源保留的最大文章数                                        | `3000`              |
 | `MAX_ITEM_AGE_DAYS`  | 入库时跳过 N 天以前的旧条目（`0` 关闭；无日期的条目总是保留） | `90`                |
 
-Cron 表达式在 `wrangler.toml` 的 `[triggers]` 中，默认每 15 分钟一次。
+Cron 表达式在 `wrangler.toml` 的 `[triggers]` 中，默认 `*/30`（每 30 分钟触发一次）；`SYNC_INTERVAL_MIN` 决定「多久未抓取」的源视为陈旧并在 cron 中补抓。
 
 ## 说明与限制
 
