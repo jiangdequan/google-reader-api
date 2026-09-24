@@ -1,0 +1,10 @@
+export const SECONDS_PER_DAY = 86400;
+export const DEFAULT_ITEM_AGE_DAYS = 90;
+export const DEFAULT_MAX_ITEMS_PER_FEED = 3000;
+export const DEFAULT_FETCH_TIMEOUT_MS = 15000;
+export const MAX_FETCH_BODY_BYTES = 3000000;
+export const DEFAULT_SYNC_INTERVAL_MIN = 15;
+export const DEFAULT_MAX_FETCH_PER_CRON = 20;
+export const DEFAULT_PAGE_LIMIT = 20;
+export const MAX_MARK_READ_ITEMS = 10000;
+export const SEARCH_RESULT_LIMIT = 1000;

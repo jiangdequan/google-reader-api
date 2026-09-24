@@ -1,3 +1,4 @@
+import { DEFAULT_FETCH_TIMEOUT_MS, MAX_FETCH_BODY_BYTES } from './constants.js';
 import { parseFeed } from './feedparser.js';
 
 const UA =
@@ -55,7 +56,7 @@ export async function fetchFeed(env, feed) {
   let timer;
   let resp;
   try {
-    const t = timeoutOf(15000);
+    const t = timeoutOf(DEFAULT_FETCH_TIMEOUT_MS);
     timer = t;
     resp = await fetch(url, { headers, redirect: 'follow', signal: t.signal });
   } catch (e) {
@@ -69,7 +70,7 @@ export async function fetchFeed(env, feed) {
   if (!resp.ok) return { error: 'HTTP ' + resp.status };
 
   let body = await resp.text();
-  if (body.length > 3000000) body = body.slice(0, 3000000);
+  if (body.length > MAX_FETCH_BODY_BYTES) body = body.slice(0, MAX_FETCH_BODY_BYTES);
   let ctype = (resp.headers.get('content-type') || '').toLowerCase();
   let finalUrl = resp.url || url;
   const etag = resp.headers.get('etag') || '';
@@ -83,7 +84,7 @@ export async function fetchFeed(env, feed) {
     if (discovered && discovered !== url) {
       let t2;
       try {
-        const t = timeoutOf(15000);
+        const t = timeoutOf(DEFAULT_FETCH_TIMEOUT_MS);
         t2 = t;
         const r2 = await fetch(discovered, {
           headers: { 'User-Agent': UA, Accept: ACCEPT },

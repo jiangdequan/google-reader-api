@@ -1,4 +1,12 @@
 import { now, sha1Hex } from '../util.js';
+import {
+  DEFAULT_ITEM_AGE_DAYS,
+  DEFAULT_MAX_ITEMS_PER_FEED,
+  DEFAULT_PAGE_LIMIT,
+  MAX_MARK_READ_ITEMS,
+  SECONDS_PER_DAY,
+  SEARCH_RESULT_LIMIT,
+} from '../constants.js';
 import { batchAll, BATCH_CHUNK, SQL_CHUNK } from './util.js';
 import { getFeedById, getFeedByUrl } from './feeds.js';
 
@@ -127,7 +135,7 @@ export async function getItemsStream(env, userId, stream, opts) {
   );
   const desc = opts.order !== 'o';
   const order = `i.published ${desc ? 'DESC' : 'ASC'}, i.id ${desc ? 'DESC' : 'ASC'}`;
-  const limit = opts.limit || 20;
+  const limit = opts.limit || DEFAULT_PAGE_LIMIT;
 
   // Collect WHERE clauses and their bound params first, then append LIMIT/OFFSET.
   // Cursor pins an exact (published, id) pair and supersedes offset.
@@ -204,12 +212,13 @@ export async function latestStreamItem(env, userId, stream, opts) {
   return r ? r.m || 0 : 0;
 }
 
-// Keep items at most MAX_ITEM_AGE_DAYS old (default 90). Entries without a
-// publish date (published=0) are always kept, otherwise feeds without dates
-// would silently end up empty. Also de-duplicates candidates by guid.
+// Keep items at most MAX_ITEM_AGE_DAYS old (default DEFAULT_ITEM_AGE_DAYS).
+// Entries without a publish date (published=0) are always kept, otherwise feeds
+// without dates would silently end up empty. Also de-duplicates candidates by
+// guid.
 function candidateItems(items, env) {
-  const maxAge = Number(env.MAX_ITEM_AGE_DAYS) || 90;
-  const cutoff = maxAge > 0 ? now() - maxAge * 86400 : 0;
+  const maxAge = Number(env.MAX_ITEM_AGE_DAYS) || DEFAULT_ITEM_AGE_DAYS;
+  const cutoff = maxAge > 0 ? now() - maxAge * SECONDS_PER_DAY : 0;
   const candidates = [];
   const seen = new Set();
   for (const it of items) {
@@ -287,7 +296,7 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
   return rows.length;
 }
 
-export async function pruneFeed(env, feedId, keep = 3000) {
+export async function pruneFeed(env, feedId, keep = DEFAULT_MAX_ITEMS_PER_FEED) {
   await env.DB.prepare(
     `DELETE FROM items WHERE feed_id=? AND id NOT IN (
        SELECT id FROM (SELECT id FROM items WHERE feed_id=? ORDER BY published DESC, id DESC LIMIT ?)
@@ -379,17 +388,21 @@ export async function setItemLabel(env, userId, itemId, label, on) {
 
 export async function markStreamRead(env, userId, stream, tsUsec) {
   const { where, args } = buildStreamWhere(userId, stream, [], null, null);
-  let conds = where;
-  const a = [...args];
+
+  // Collect WHERE clauses and their bound params first, then only decorate the
+  // tail below (mirrors getItemsStream).
+  const clauses = where ? [where.replace(/^\s*WHERE\s+/, '')] : [];
+  const params = [...args];
   if (tsUsec) {
-    const t = Math.floor(tsUsec / 1e6);
-    conds += (conds ? ' AND ' : ' WHERE ') + 'i.published <= ?';
-    a.push(t);
+    clauses.push('i.published <= ?');
+    params.push(Math.floor(tsUsec / 1e6));
   }
+  const conds = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
+
   const res = await env.DB.prepare(
-    `SELECT i.id FROM items i ${conds} ORDER BY i.published DESC LIMIT 10000`,
+    `SELECT i.id FROM items i ${conds} ORDER BY i.published DESC LIMIT ${MAX_MARK_READ_ITEMS}`,
   )
-    .bind(...a)
+    .bind(...params)
     .all();
   const ids = (res.results || []).map((r) => r.id);
   const stmts = ids.map((id) =>
@@ -453,7 +466,7 @@ export async function searchItems(env, userId, q, opts) {
     (where ? ' AND ' : ' WHERE ') +
     ` (i.title LIKE ? ESCAPE '\\' OR i.content LIKE ? ESCAPE '\\')`;
   const res = await env.DB.prepare(
-    sql + ` ORDER BY i.published DESC, i.id DESC LIMIT 1000`,
+    sql + ` ORDER BY i.published DESC, i.id DESC LIMIT ${SEARCH_RESULT_LIMIT}`,
   )
     .bind(...args, like, like)
     .all();

@@ -1,3 +1,5 @@
+import { escapeAttr, escapeHtml } from './util.js';
+
 const VOID = new Set([
   'area',
   'base',
@@ -18,17 +20,6 @@ const VOID = new Set([
 export function localName(name) {
   const i = String(name).indexOf(':');
   return i === -1 ? name : name.slice(i + 1);
-}
-
-function esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function escA(s) {
-  return esc(s).replace(/"/g, '&quot;');
 }
 
 /**
@@ -177,10 +168,10 @@ export function attr(node, name) {
 
 export function serializeHtml(node) {
   if (!node) return '';
-  if (node.t) return esc(node.text || '');
+  if (node.t) return escapeHtml(node.text || '');
   let out = '<' + node.name;
   for (const k of Object.keys(node.attrs || {})) {
-    out += ' ' + k + '="' + escA(node.attrs[k]) + '"';
+    out += ' ' + k + '="' + escapeAttr(node.attrs[k]) + '"';
   }
   if (node.children && node.children.length) {
     out += '>';
