@@ -9,18 +9,7 @@ const GREADER = '/reader/api/0';
 
 // Credentials may legitimately travel in the query string (?password=, ?auth=
 // tokens, ClientLogin Email/Passwd...); never write their values to logs.
-const SENSITIVE_PARAMS = new Set([
-  'auth',
-  'Token',
-  'token',
-  'T',
-  'login',
-  'Email',
-  'u',
-  'password',
-  'Passwd',
-  'pw',
-]);
+const SENSITIVE_PARAMS = new Set(['auth', 'Token', 'token', 'T', 'login', 'Email', 'u', 'password', 'Passwd', 'pw']);
 
 function logTarget(u) {
   const params = [...u.searchParams.entries()]

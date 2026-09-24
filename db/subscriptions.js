@@ -2,9 +2,7 @@ import { attachLabel } from './tags.js';
 import { rowsForIn } from './util.js';
 
 export async function addSubscription(env, userId, feedId, title, labels = []) {
-  await env.DB.prepare(
-    'INSERT OR IGNORE INTO subscriptions(user_id, feed_id, title) VALUES (?,?,?)',
-  )
+  await env.DB.prepare('INSERT OR IGNORE INTO subscriptions(user_id, feed_id, title) VALUES (?,?,?)')
     .bind(userId, feedId, title || '')
     .run();
   for (const l of labels) {
@@ -13,28 +11,18 @@ export async function addSubscription(env, userId, feedId, title, labels = []) {
 }
 
 export async function removeSubscription(env, userId, feedId) {
-  await env.DB.prepare('DELETE FROM subscriptions WHERE user_id=? AND feed_id=?')
-    .bind(userId, feedId)
-    .run();
-  await env.DB.prepare(
-    'DELETE FROM subscription_tags WHERE user_id=? AND feed_id=?',
-  )
-    .bind(userId, feedId)
-    .run();
+  await env.DB.prepare('DELETE FROM subscriptions WHERE user_id=? AND feed_id=?').bind(userId, feedId).run();
+  await env.DB.prepare('DELETE FROM subscription_tags WHERE user_id=? AND feed_id=?').bind(userId, feedId).run();
 }
 
 export async function hasSubscription(env, userId, feedId) {
-  return await env.DB.prepare(
-    'SELECT 1 AS one FROM subscriptions WHERE user_id=? AND feed_id=?',
-  )
+  return await env.DB.prepare('SELECT 1 AS one FROM subscriptions WHERE user_id=? AND feed_id=?')
     .bind(userId, feedId)
     .first();
 }
 
 export async function updateSubscriptionTitle(env, userId, feedId, title) {
-  await env.DB.prepare(
-    'UPDATE subscriptions SET title=? WHERE user_id=? AND feed_id=?',
-  )
+  await env.DB.prepare('UPDATE subscriptions SET title=? WHERE user_id=? AND feed_id=?')
     .bind(title || '', userId, feedId)
     .run();
 }

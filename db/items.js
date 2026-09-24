@@ -159,9 +159,7 @@ export async function getItemsStream(env, userId, stream, opts) {
 
   if (opts.refsOnly) {
     // stream/items/ids only needs ids + timestamps; skip the feed join and payload columns.
-    const res = await env.DB.prepare(
-      `SELECT i.rowid, i.id, i.published, i.timestamp_usec FROM items i ${conds}${tail}`,
-    )
+    const res = await env.DB.prepare(`SELECT i.rowid, i.id, i.published, i.timestamp_usec FROM items i ${conds}${tail}`)
       .bind(...params)
       .all();
     const rows = (res.results || []).slice(0, limit);
@@ -182,9 +180,7 @@ export async function getItemsStream(env, userId, stream, opts) {
 
 export async function countStreamItems(env, userId, stream, opts) {
   const { where, args } = buildStreamWhere(userId, stream, opts);
-  const r = await env.DB.prepare(
-    `SELECT COUNT(*) AS c FROM items i ${where}`,
-  )
+  const r = await env.DB.prepare(`SELECT COUNT(*) AS c FROM items i ${where}`)
     .bind(...args)
     .first();
   return r ? r.c : 0;
@@ -192,9 +188,7 @@ export async function countStreamItems(env, userId, stream, opts) {
 
 export async function latestStreamItem(env, userId, stream, opts) {
   const { where, args } = buildStreamWhere(userId, stream, opts);
-  const r = await env.DB.prepare(
-    `SELECT MAX(i.published) AS m FROM items i ${where}`,
-  )
+  const r = await env.DB.prepare(`SELECT MAX(i.published) AS m FROM items i ${where}`)
     .bind(...args)
     .first();
   return r ? r.m || 0 : 0;
@@ -226,9 +220,10 @@ async function storedGuids(env, feedId, items) {
   const rows = await rowsForIn(
     env,
     (chunk, ph) =>
-      env.DB.prepare(
-        `SELECT guid, url FROM items WHERE feed_id=? AND guid IN (${ph})`,
-      ).bind(feedId, ...chunk.map((c) => c.guid)),
+      env.DB.prepare(`SELECT guid, url FROM items WHERE feed_id=? AND guid IN (${ph})`).bind(
+        feedId,
+        ...chunk.map((c) => c.guid),
+      ),
     items,
   );
   for (const r of rows) map.set(r.guid, r.url);
@@ -269,7 +264,19 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
   );
   const binds = rows.map((r) =>
-    stmt.bind(r.id, feedId, r.guid, r.url, r.title, r.author, r.content, r.enclosure, r.published, r.timestamp_usec, r.crawl_time),
+    stmt.bind(
+      r.id,
+      feedId,
+      r.guid,
+      r.url,
+      r.title,
+      r.author,
+      r.content,
+      r.enclosure,
+      r.published,
+      r.timestamp_usec,
+      r.crawl_time,
+    ),
   );
   for (let i = 0; i < binds.length; i += BATCH_CHUNK) {
     await env.DB.batch(binds.slice(i, i + BATCH_CHUNK));
@@ -288,12 +295,8 @@ export async function pruneFeed(env, feedId, keep = DEFAULT_MAX_ITEMS_PER_FEED) 
   )
     .bind(feedId, feedId, keep)
     .run();
-  await env.DB.prepare(
-    'DELETE FROM item_states WHERE item_id NOT IN (SELECT id FROM items)',
-  ).run();
-  await env.DB.prepare(
-    'DELETE FROM item_tags WHERE item_id NOT IN (SELECT id FROM items)',
-  ).run();
+  await env.DB.prepare('DELETE FROM item_states WHERE item_id NOT IN (SELECT id FROM items)').run();
+  await env.DB.prepare('DELETE FROM item_tags WHERE item_id NOT IN (SELECT id FROM items)').run();
 }
 
 export async function getStatesForItems(env, userId, ids) {
@@ -301,9 +304,10 @@ export async function getStatesForItems(env, userId, ids) {
   const rows = await rowsForIn(
     env,
     (chunk, ph) =>
-      env.DB.prepare(
-        `SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`,
-      ).bind(userId, ...chunk),
+      env.DB.prepare(`SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`).bind(
+        userId,
+        ...chunk,
+      ),
     [...new Set(ids)],
   );
   for (const r of rows) {
@@ -317,9 +321,10 @@ export async function getLabelsForItems(env, userId, ids) {
   const rows = await rowsForIn(
     env,
     (chunk, ph) =>
-      env.DB.prepare(
-        `SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`,
-      ).bind(userId, ...chunk),
+      env.DB.prepare(`SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`).bind(
+        userId,
+        ...chunk,
+      ),
     [...new Set(ids)],
   );
   for (const r of rows) {
@@ -330,15 +335,11 @@ export async function getLabelsForItems(env, userId, ids) {
 
 export async function setItemState(env, userId, itemId, state, on) {
   if (on) {
-    await env.DB.prepare(
-      'INSERT OR IGNORE INTO item_states(user_id, item_id, state) VALUES (?,?,?)',
-    )
+    await env.DB.prepare('INSERT OR IGNORE INTO item_states(user_id, item_id, state) VALUES (?,?,?)')
       .bind(userId, itemId, state)
       .run();
   } else {
-    await env.DB.prepare(
-      'DELETE FROM item_states WHERE user_id=? AND item_id=? AND state=?',
-    )
+    await env.DB.prepare('DELETE FROM item_states WHERE user_id=? AND item_id=? AND state=?')
       .bind(userId, itemId, state)
       .run();
   }
@@ -346,15 +347,11 @@ export async function setItemState(env, userId, itemId, state, on) {
 
 export async function setItemLabel(env, userId, itemId, label, on) {
   if (on) {
-    await env.DB.prepare(
-      'INSERT OR IGNORE INTO item_tags(user_id, item_id, label) VALUES (?,?,?)',
-    )
+    await env.DB.prepare('INSERT OR IGNORE INTO item_tags(user_id, item_id, label) VALUES (?,?,?)')
       .bind(userId, itemId, label)
       .run();
   } else {
-    await env.DB.prepare(
-      'DELETE FROM item_tags WHERE user_id=? AND item_id=? AND label=?',
-    )
+    await env.DB.prepare('DELETE FROM item_tags WHERE user_id=? AND item_id=? AND label=?')
       .bind(userId, itemId, label)
       .run();
   }
@@ -380,9 +377,11 @@ export async function markStreamRead(env, userId, stream, tsUsec) {
     .all();
   const ids = (res.results || []).map((r) => r.id);
   const stmts = ids.map((id) =>
-    env.DB.prepare(
-      'INSERT OR IGNORE INTO item_states(user_id, item_id, state) VALUES (?,?,?)',
-    ).bind(userId, id, 'read'),
+    env.DB.prepare('INSERT OR IGNORE INTO item_states(user_id, item_id, state) VALUES (?,?,?)').bind(
+      userId,
+      id,
+      'read',
+    ),
   );
   for (let i = 0; i < stmts.length; i += BATCH_CHUNK) {
     await env.DB.batch(stmts.slice(i, i + BATCH_CHUNK));
@@ -436,9 +435,7 @@ export async function searchItems(env, userId, q, opts) {
     (where ? ` ${where}` : '') +
     (where ? ' AND ' : ' WHERE ') +
     ` (i.title LIKE ? ESCAPE '\\' OR i.content LIKE ? ESCAPE '\\')`;
-  const res = await env.DB.prepare(
-    sql + ` ORDER BY i.published DESC, i.id DESC LIMIT ${SEARCH_RESULT_LIMIT}`,
-  )
+  const res = await env.DB.prepare(sql + ` ORDER BY i.published DESC, i.id DESC LIMIT ${SEARCH_RESULT_LIMIT}`)
     .bind(...args, like, like)
     .all();
   return res.results || [];

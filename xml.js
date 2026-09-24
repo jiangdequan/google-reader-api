@@ -35,28 +35,25 @@ export function parseXML(input) {
   const stack = [];
 
   const decodeEntities = (s) =>
-    s.replace(
-      /&#x([0-9a-fA-F]+);|&#(\d+);|&lt;|&gt;|&quot;|&apos;|&nbsp;|&amp;/g,
-      (m, h, d) => {
-        if (h) return String.fromCodePoint(parseInt(h, 16));
-        if (d) return String.fromCodePoint(parseInt(d, 10));
-        switch (m) {
-          case '&lt;':
-            return '<';
-          case '&gt;':
-            return '>';
-          case '&quot;':
-            return '"';
-          case '&apos;':
-            return "'";
-          case '&nbsp;':
-            return '\u00a0';
-          case '&amp;':
-            return '&';
-        }
-        return m;
-      },
-    );
+    s.replace(/&#x([0-9a-fA-F]+);|&#(\d+);|&lt;|&gt;|&quot;|&apos;|&nbsp;|&amp;/g, (m, h, d) => {
+      if (h) return String.fromCodePoint(parseInt(h, 16));
+      if (d) return String.fromCodePoint(parseInt(d, 10));
+      switch (m) {
+        case '&lt;':
+          return '<';
+        case '&gt;':
+          return '>';
+        case '&quot;':
+          return '"';
+        case '&apos;':
+          return "'";
+        case '&nbsp;':
+          return '\u00a0';
+        case '&amp;':
+          return '&';
+      }
+      return m;
+    });
 
   const addText = (raw) => {
     const t = decodeEntities(raw);
@@ -153,7 +150,7 @@ export function firstOf(node, name) {
 
 export function childText(node, name) {
   const el = firstOf(node, name);
-  return el ? ((el.text || '').trim() || '') : '';
+  return el ? (el.text || '').trim() || '' : '';
 }
 
 export function attr(node, name) {

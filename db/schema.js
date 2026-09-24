@@ -106,9 +106,7 @@ async function normalizeStateKeys(env) {
   const rowids = [...byRowid.keys()];
   for (let i = 0; i < rowids.length; i += SQL_CHUNK) {
     const chunk = rowids.slice(i, i + SQL_CHUNK);
-    const found = await env.DB.prepare(
-      `SELECT rowid, id FROM items WHERE rowid IN (${chunk.map(() => '?').join(',')})`,
-    )
+    const found = await env.DB.prepare(`SELECT rowid, id FROM items WHERE rowid IN (${chunk.map(() => '?').join(',')})`)
       .bind(...chunk)
       .all();
     const stmts = [];

@@ -69,8 +69,16 @@ async function loadStreamItems(env, user, stream, opts, out) {
   if (stream.kind === 'unknown') return;
   const { rows, hasMore } = await getItemsStream(env, user.id, stream, opts);
   const [states, labels] = await Promise.all([
-    getStatesForItems(env, user.id, rows.map((r) => r.id)),
-    getLabelsForItems(env, user.id, rows.map((r) => r.id)),
+    getStatesForItems(
+      env,
+      user.id,
+      rows.map((r) => r.id),
+    ),
+    getLabelsForItems(
+      env,
+      user.id,
+      rows.map((r) => r.id),
+    ),
   ]);
   out.items = rows.map((r) => itemToJson(r, states, labels));
   if (hasMore && rows.length) {
@@ -90,7 +98,11 @@ export async function streamItemsIds(request, env, user) {
   if (stream.kind !== 'unknown') {
     const { rows, hasMore } = await getItemsStream(env, user.id, stream, opts);
     const states = withDirect
-      ? await getStatesForItems(env, user.id, rows.map((r) => r.id))
+      ? await getStatesForItems(
+          env,
+          user.id,
+          rows.map((r) => r.id),
+        )
       : null;
     out.itemRefs = rows.map((r) => {
       const ref = {

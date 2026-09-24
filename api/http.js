@@ -20,11 +20,7 @@ export function clampInt(v, def, min, max) {
 // getItemsStream/countStreamItems expect. `paging:false` keeps only the
 // xt/it filters (all that a COUNT needs); `refsOnly`/`maxLimit` serve the
 // stream/items/ids endpoint.
-export async function buildStreamOpts(
-  url,
-  env,
-  { refsOnly = false, paging = true, maxLimit = 1000 } = {},
-) {
+export async function buildStreamOpts(url, env, { refsOnly = false, paging = true, maxLimit = 1000 } = {}) {
   const [xtResolved, itResolved] = await Promise.all([
     resolveStreamIds(env, url.searchParams.getAll('xt')),
     resolveStreamIds(env, url.searchParams.getAll('it')),

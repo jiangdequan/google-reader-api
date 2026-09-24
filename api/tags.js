@@ -22,15 +22,9 @@ export async function tagList(request, env, user) {
 export async function editTag(request, env, user) {
   const url = new URL(request.url);
   const form = await readForm(request);
-  const ids = url.searchParams.getAll('i').length
-    ? url.searchParams.getAll('i')
-    : form.getAll('i');
-  const adds = url.searchParams.getAll('a').length
-    ? url.searchParams.getAll('a')
-    : form.getAll('a');
-  const removes = url.searchParams.getAll('r').length
-    ? url.searchParams.getAll('r')
-    : form.getAll('r');
+  const ids = url.searchParams.getAll('i').length ? url.searchParams.getAll('i') : form.getAll('i');
+  const adds = url.searchParams.getAll('a').length ? url.searchParams.getAll('a') : form.getAll('a');
+  const removes = url.searchParams.getAll('r').length ? url.searchParams.getAll('r') : form.getAll('r');
   for (const id of ids) {
     for (const a of adds) await applyTag(env, user, id, a, true);
     for (const r of removes) await applyTag(env, user, id, r, false);

@@ -60,13 +60,9 @@ export function toHex(buf) {
 
 export async function hmacHex(secret, data) {
   if (!secret) throw new Error('hmacHex requires a secret');
-  const key = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+  ]);
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
   return toHex(sig);
 }

@@ -21,11 +21,11 @@ export async function subscriptionList(request, env, user) {
     env,
     subs.map((s) => s.feed_id),
   );
-  const sorted = subs.slice().sort((a, b) =>
-    (a.custom_title || a.feed_title || a.feed_url).localeCompare(
-      b.custom_title || b.feed_title || b.feed_url,
-    ),
-  );
+  const sorted = subs
+    .slice()
+    .sort((a, b) =>
+      (a.custom_title || a.feed_title || a.feed_url).localeCompare(b.custom_title || b.feed_title || b.feed_url),
+    );
   return json({
     subscriptions: sorted.map((s, i) => {
       const title = s.custom_title || s.feed_title || s.feed_url;
@@ -81,16 +81,14 @@ export async function subscriptionEdit(request, env, user) {
   const url = new URL(request.url);
   const form = await readForm(request);
   const pick = (name) => form.get(name) || url.searchParams.get(name);
-  const pickAll = (...names) =>
-    names.flatMap((name) => [...form.getAll(name), ...url.searchParams.getAll(name)]);
+  const pickAll = (...names) => names.flatMap((name) => [...form.getAll(name), ...url.searchParams.getAll(name)]);
   const ac = pick('ac') || 'subscribe';
   let s = pick('s') || pick('url') || '';
   if (s.startsWith('feed/')) s = s.slice(5);
   const t = pick('t') || '';
   const labelsToAdd = [...new Set(pickAll('add', 'a').map(stripLabel).filter(Boolean))];
   const labelsToRemove = [...new Set(pickAll('r', 'remove').map(stripLabel).filter(Boolean))];
-  const lookupFeed = (ref) =>
-    /^\d+$/.test(ref) ? getFeedById(env, Number(ref)) : getFeedByUrl(env, ref);
+  const lookupFeed = (ref) => (/^\d+$/.test(ref) ? getFeedById(env, Number(ref)) : getFeedByUrl(env, ref));
 
   if (ac === 'unsubscribe' || ac === 'remove' || ac === 'unsub' || ac === 'delete') {
     const feed = await lookupFeed(s);

@@ -11,9 +11,7 @@ export async function getFeedById(env, id) {
 export async function insertFeed(env, meta) {
   const existing = await getFeedByUrl(env, meta.url);
   if (existing) {
-    await env.DB.prepare(
-      'UPDATE feeds SET title=?, html_url=?, description=?, etag=?, updated=? WHERE id=?',
-    )
+    await env.DB.prepare('UPDATE feeds SET title=?, html_url=?, description=?, etag=?, updated=? WHERE id=?')
       .bind(
         meta.title || existing.title,
         meta.htmlUrl || existing.html_url,
@@ -34,17 +32,13 @@ export async function insertFeed(env, meta) {
 }
 
 export async function updateFetchMeta(env, feedId, { error, etag, updated }) {
-  await env.DB.prepare(
-    'UPDATE feeds SET last_fetched=?, fetch_error=?, etag=?, updated=? WHERE id=?',
-  )
+  await env.DB.prepare('UPDATE feeds SET last_fetched=?, fetch_error=?, etag=?, updated=? WHERE id=?')
     .bind(now(), error || '', etag || '', updated || 0, feedId)
     .run();
 }
 
 export async function staleFeeds(env, since, limit) {
-  const res = await env.DB.prepare(
-    'SELECT * FROM feeds WHERE last_fetched < ? ORDER BY last_fetched ASC LIMIT ?',
-  )
+  const res = await env.DB.prepare('SELECT * FROM feeds WHERE last_fetched < ? ORDER BY last_fetched ASC LIMIT ?')
     .bind(since, limit)
     .all();
   return res.results || [];

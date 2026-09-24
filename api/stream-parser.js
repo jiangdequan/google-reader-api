@@ -79,15 +79,15 @@ export async function streamTitle(env, stream, username) {
   if (stream.kind === 'label') return `${stream.name} streaming list`;
   switch (stream.state) {
     case 'starred':
-      return "Starred items";
+      return 'Starred items';
     case 'broadcast':
-      return "Shared items";
+      return 'Shared items';
     case 'kept-unread':
-      return "Kept-unread items";
+      return 'Kept-unread items';
     case 'read':
-      return "Read items";
+      return 'Read items';
     case 'fresh':
-      return "Fresh items";
+      return 'Fresh items';
     default:
       return `${username}'s reading list`;
   }

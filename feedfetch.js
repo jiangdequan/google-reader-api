@@ -2,8 +2,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, MAX_FETCH_BODY_BYTES } from './constants.js';
 import { parseFeed } from './feedparser.js';
 import { timeout } from './util.js';
 
-const UA =
-  'Mozilla/5.0 (compatible; SelfHostedGoogleReader/1.0; +https://github.com/awesome-workers)';
+const UA = 'Mozilla/5.0 (compatible; SelfHostedGoogleReader/1.0; +https://github.com/awesome-workers)';
 const ACCEPT =
   'application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, text/html, */*;q=0.1';
 

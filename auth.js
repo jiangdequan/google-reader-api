@@ -75,10 +75,8 @@ export async function authenticateRequest(request, env, url) {
     if (uid) return await getUserById(env, Number(uid));
   }
 
-  const loginParam =
-    url.searchParams.get('login') || url.searchParams.get('Email') || url.searchParams.get('u');
-  const passParam =
-    url.searchParams.get('password') || url.searchParams.get('Passwd') || url.searchParams.get('pw');
+  const loginParam = url.searchParams.get('login') || url.searchParams.get('Email') || url.searchParams.get('u');
+  const passParam = url.searchParams.get('password') || url.searchParams.get('Passwd') || url.searchParams.get('pw');
   if (loginParam && passParam !== null) {
     return await verifyPassword(env, loginParam, passParam);
   }
@@ -97,8 +95,7 @@ export async function clientLogin(request, env, url) {
     }
   }
   const Email = url.searchParams.get('Email') || (form && form.get('Email')) || '';
-  const Passwd =
-    url.searchParams.get('Passwd') || (form && form.get('Passwd')) || '';
+  const Passwd = url.searchParams.get('Passwd') || (form && form.get('Passwd')) || '';
   const user = await verifyPassword(env, Email, Passwd);
   if (!user) return text('Error=BadAuthentication\n', 403);
   const auth = await issueToken(env, user.id);

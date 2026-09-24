@@ -6,14 +6,12 @@ import { subscribedPredicate } from './util.js';
 const subscribed = (userId) => subscribedPredicate(userId);
 
 const notRead = (userId) => ({
-  sql:
-    "NOT EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='read')",
+  sql: "NOT EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='read')",
   args: [userId],
 });
 
 const starred = (userId) => ({
-  sql:
-    "EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='starred')",
+  sql: "EXISTS (SELECT 1 FROM item_states s WHERE s.user_id=? AND s.item_id=i.id AND s.state='starred')",
   args: [userId],
 });
 

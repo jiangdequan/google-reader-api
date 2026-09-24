@@ -6,13 +6,15 @@
   "scripts": {
     "start:gr": "wrangler dev --local --env staging index.js -c wrangler.toml --ip 0.0.0.0",
     "deploy": "wrangler deploy --env production index.js -c wrangler.toml",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "format": "prettier --write \"**/*.{js,mjs,json}\"",
+    "format:check": "prettier --check \"**/*.{js,mjs,json}\""
   },
   "author": "jiangdequan <jiangdequan1314@gmail.com>",
   "license": "MIT",
   "devDependencies": {
     "miniflare": "^3.20231218.0",
-    "prettier": "^1.18.2",
+    "prettier": "^3.6.2",
     "wrangler": "^4.134.0"
   },
   "dependencies": {

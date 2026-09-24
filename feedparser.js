@@ -1,12 +1,4 @@
-import {
-  parseXML,
-  childrenOf,
-  firstOf,
-  childText,
-  attr,
-  localName,
-  serializeHtml,
-} from './xml.js';
+import { parseXML, childrenOf, firstOf, childText, attr, localName, serializeHtml } from './xml.js';
 import { parseDate } from './util.js';
 
 export function parseFeed(body, contentType) {
@@ -46,58 +38,60 @@ function parseAtom(root) {
   }
   if (!htmlUrl && links.length) htmlUrl = attr(links[0], 'href') || '';
 
-  const items = childrenOf(root, 'entry').map((entry) => {
-    const id = childText(entry, 'id');
-    let url = '';
-    for (const l of childrenOf(entry, 'link')) {
-      const rel = attr(l, 'rel');
-      if (!rel || rel === 'alternate') url = attr(l, 'href') || url;
-    }
-    const contentNode = firstOf(entry, 'content');
-    const summaryNode = firstOf(entry, 'summary');
-    let content = '';
-    if (contentNode) {
-      const type = attr(contentNode, 'type') || 'html';
-      if (type === 'xhtml') {
-        content = (contentNode.children || []).map(serializeHtml).join('');
-      } else {
-        content = (contentNode.text || '').trim();
-        if (!content && contentNode.children && contentNode.children.length) {
-          content = contentNode.children.map(serializeHtml).join('');
+  const items = childrenOf(root, 'entry')
+    .map((entry) => {
+      const id = childText(entry, 'id');
+      let url = '';
+      for (const l of childrenOf(entry, 'link')) {
+        const rel = attr(l, 'rel');
+        if (!rel || rel === 'alternate') url = attr(l, 'href') || url;
+      }
+      const contentNode = firstOf(entry, 'content');
+      const summaryNode = firstOf(entry, 'summary');
+      let content = '';
+      if (contentNode) {
+        const type = attr(contentNode, 'type') || 'html';
+        if (type === 'xhtml') {
+          content = (contentNode.children || []).map(serializeHtml).join('');
+        } else {
+          content = (contentNode.text || '').trim();
+          if (!content && contentNode.children && contentNode.children.length) {
+            content = contentNode.children.map(serializeHtml).join('');
+          }
+        }
+      } else if (summaryNode) {
+        content =
+          (summaryNode.children && summaryNode.children.length
+            ? summaryNode.children.map(serializeHtml).join('')
+            : (summaryNode.text || '').trim()) || '';
+      }
+
+      let enclosure = '';
+      for (const l of childrenOf(entry, 'link')) {
+        if ((attr(l, 'rel') || '') === 'enclosure') {
+          enclosure = attr(l, 'href') || '';
+          break;
         }
       }
-    } else if (summaryNode) {
-      content =
-        (summaryNode.children && summaryNode.children.length
-          ? summaryNode.children.map(serializeHtml).join('')
-          : (summaryNode.text || '').trim()) || '';
-    }
 
-    let enclosure = '';
-    for (const l of childrenOf(entry, 'link')) {
-      if ((attr(l, 'rel') || '') === 'enclosure') {
-        enclosure = attr(l, 'href') || '';
-        break;
-      }
-    }
+      const authorName = firstOf(firstOf(entry, 'author'), 'name');
+      const published = parseDate(
+        childText(entry, 'published') || childText(entry, 'issued') || childText(entry, 'updated'),
+      );
+      const updated = parseDate(childText(entry, 'updated') || childText(entry, 'modified'));
 
-    const authorName = firstOf(firstOf(entry, 'author'), 'name');
-    const published = parseDate(
-      childText(entry, 'published') || childText(entry, 'issued') || childText(entry, 'updated'),
-    );
-    const updated = parseDate(childText(entry, 'updated') || childText(entry, 'modified'));
-
-    return {
-      guid: firstText(id, url),
-      url,
-      title: childText(entry, 'title'),
-      author: authorName ? (authorName.text || '').trim() : '',
-      content,
-      enclosure,
-      published,
-      updated: updated || published,
-    };
-  }).filter((it) => it.guid || it.url);
+      return {
+        guid: firstText(id, url),
+        url,
+        title: childText(entry, 'title'),
+        author: authorName ? (authorName.text || '').trim() : '',
+        content,
+        enclosure,
+        published,
+        updated: updated || published,
+      };
+    })
+    .filter((it) => it.guid || it.url);
 
   return {
     type: 'atom',
@@ -136,8 +130,7 @@ function itemToRssItem(item) {
   let enclosure = '';
   const enc = firstOf(item, 'enclosure');
   if (enc) enclosure = attr(enc, 'url') || '';
-  const published =
-    parseDate(childText(item, 'pubDate')) || parseDate(childText(item, 'date'));
+  const published = parseDate(childText(item, 'pubDate')) || parseDate(childText(item, 'date'));
   return {
     guid: firstText(guid, link),
     url: link,
