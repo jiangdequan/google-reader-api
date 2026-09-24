@@ -11,7 +11,9 @@ export function buildOpml(title, groups) {
     );
     if (feeds.length === 0) continue;
     if (g.name) {
-      body += `  <outline text="${escapeAttr(g.name)}" title="${escapeAttr(g.name)}">\n${feeds.join('\n')}\n  </outline>\n`;
+      body +=
+        `  <outline text="${escapeAttr(g.name)}" title="${escapeAttr(g.name)}">` +
+        `\n${feeds.join('\n')}\n  </outline>\n`;
     } else {
       body += feeds.join('\n') + '\n';
     }

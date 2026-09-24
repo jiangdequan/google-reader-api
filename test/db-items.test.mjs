@@ -261,7 +261,8 @@ test('markStreamRead: read-selection SQL matches buildStreamWhere + time bound',
   const q = db.plan[0];
   assert.equal(
     norm(q.sql),
-    'SELECT i.id FROM items i WHERE EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id) AND i.published <= ? ORDER BY i.published DESC LIMIT 10000',
+    'SELECT i.id FROM items i WHERE EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? ' +
+      'AND su.feed_id=i.feed_id) AND i.published <= ? ORDER BY i.published DESC LIMIT 10000',
   );
   assert.deepEqual(q.args, [USER, 1700000000]);
   const inserts = db.plan.filter((p) => p.sql.includes('INSERT OR IGNORE INTO item_states'));

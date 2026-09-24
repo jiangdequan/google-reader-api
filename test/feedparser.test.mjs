@@ -25,10 +25,14 @@ const ATOM = `<?xml version="1.0" encoding="utf-8"?>
   </entry>
 </feed>`;
 
-const RSS2 = `<rss version="2.0"><channel>
+const RSS2 =
+  `<rss version="2.0"><channel>
 <title>RSS Title</title><link>http://ex.com</link><description>desc</description>
-<item><guid>g1</guid><link>http://ex.com/1</link><title>One</title><pubDate>Tue, 02 Jan 2024 03:04:05 GMT</pubDate></item>
-<item><link>http://ex.com/2</link><title>Two</title><description><![CDATA[<b>c</b>]]></description></item>
+` +
+  `<item><guid>g1</guid><link>http://ex.com/1</link><title>One</title>` +
+  `<pubDate>Tue, 02 Jan 2024 03:04:05 GMT</pubDate></item>
+` +
+  `<item><link>http://ex.com/2</link><title>Two</title><description><![CDATA[<b>c</b>]]></description></item>
 </channel></rss>`;
 
 const RSS1 = `<rdf:RDF xmlns="http://purl.org/rss/1.0/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">

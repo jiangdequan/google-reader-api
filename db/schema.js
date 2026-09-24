@@ -94,7 +94,8 @@ function keyRowid(k) {
 
 async function normalizeStateKeys(env) {
   const res = await env.DB.prepare(
-    "SELECT DISTINCT item_id FROM (SELECT item_id FROM item_states UNION SELECT item_id FROM item_tags) WHERE item_id NOT LIKE 'tag:%'",
+    'SELECT DISTINCT item_id FROM (SELECT item_id FROM item_states ' +
+      "UNION SELECT item_id FROM item_tags) WHERE item_id NOT LIKE 'tag:%'",
   ).all();
   const keys = (res.results || []).map((r) => r.item_id);
   if (!keys.length) return;
@@ -115,13 +116,15 @@ async function normalizeStateKeys(env) {
       if (!legacy || String(row.id) === String(legacy)) continue;
       stmts.push(
         env.DB.prepare(
-          'INSERT OR IGNORE INTO item_states(user_id, item_id, state) SELECT user_id, ?, state FROM item_states WHERE item_id = ?',
+          'INSERT OR IGNORE INTO item_states(user_id, item_id, state) SELECT user_id, ?, state ' +
+            'FROM item_states WHERE item_id = ?',
         ).bind(row.id, legacy),
       );
       stmts.push(env.DB.prepare('DELETE FROM item_states WHERE item_id = ?').bind(legacy));
       stmts.push(
         env.DB.prepare(
-          'INSERT OR IGNORE INTO item_tags(user_id, item_id, label) SELECT user_id, ?, label FROM item_tags WHERE item_id = ?',
+          'INSERT OR IGNORE INTO item_tags(user_id, item_id, label) SELECT user_id, ?, label ' +
+            'FROM item_tags WHERE item_id = ?',
         ).bind(row.id, legacy),
       );
       stmts.push(env.DB.prepare('DELETE FROM item_tags WHERE item_id = ?').bind(legacy));

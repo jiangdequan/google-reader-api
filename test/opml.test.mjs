@@ -5,9 +5,12 @@ import { buildOpml, parseOpml } from '../opml.js';
 import { importOpml } from '../api/opml.js';
 import { FakeDB } from './_fakedb.mjs';
 
-const ATOM = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+const ATOM =
+  `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
 <title>T</title><updated>2026-09-20T00:00:00Z</updated>
-<entry><title>E</title><id>urn:1</id><updated>2026-09-20T00:00:00Z</updated><link href="https://e.com/1"/></entry></feed>`;
+` +
+  `<entry><title>E</title><id>urn:1</id><updated>2026-09-20T00:00:00Z</updated><link href="https://e.com/1"/></entry>` +
+  `</feed>`;
 
 const silent = (t) => {
   t.mock.method(console, 'log', () => {});

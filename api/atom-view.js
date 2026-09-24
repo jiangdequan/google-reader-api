@@ -56,7 +56,9 @@ export function atomContents(out, selfHref) {
     for (const c of it.categories || []) s += `<category term="${escapeHtml(c)}"/>\n`;
     const body = (it.summary && it.summary.content) || (it.content && it.content.content) || '';
     s += `<content type="html">${escapeHtml(body)}</content>\n`;
-    s += `<gr:origin streamId="${escapeHtml(it.origin.streamId)}" title="${escapeHtml(it.origin.title || '')}" htmlUrl="${escapeHtml(it.origin.htmlUrl || '')}"/>\n`;
+    s +=
+      `<gr:origin streamId="${escapeHtml(it.origin.streamId)}" title="${escapeHtml(it.origin.title || '')}"` +
+      ` htmlUrl="${escapeHtml(it.origin.htmlUrl || '')}"/>\n`;
     s += `</entry>\n`;
   }
   s += `</feed>\n`;
