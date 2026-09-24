@@ -97,33 +97,33 @@ npm run deploy:gr
 
 ## 已实现的 API
 
-| 端点 | 方法 | 说明 |
-| --- | --- | --- |
-| `/accounts/ClientLogin` | GET/POST | 账号密码换取 Auth token |
-| `/reader/api/0/auth-token` | GET | 获取 token |
-| `/reader/api/0/token` | GET | 获取 token（同 auth-token） |
-| `/reader/api/0/user-info` | GET | 用户信息 |
-| `/reader/api/0/subscription/list` | GET | 订阅列表（含分组/标签） |
-| `/reader/api/0/subscription/quickadd` | POST | 通过 URL 添加订阅 |
-| `/reader/api/0/subscription/edit` | POST | 订阅/取消订阅、改标题、加/删标签 |
-| `/reader/api/0/tag/list` | GET | 标签列表 |
-| `/reader/api/0/rename-tag` | POST | 重命名标签 |
-| `/reader/api/0/disable-tag` | POST | 删除标签 |
-| `/reader/api/0/edit-tag` | POST | 已读/未读/星标/标签编辑 |
-| `/reader/api/0/mark-all-as-read` | POST | 全部标记已读 |
-| `/reader/api/0/unread-count` | GET | 未读数统计 |
-| `/reader/api/0/stream/contents/{stream}` | GET | 流内容（JSON / Atom） |
-| `/reader/api/0/stream/items/ids` | GET | 流的条目 ID 列表 |
-| `/reader/api/0/stream/items/contents` | GET/POST | 指定条目详情 |
-| `/reader/api/0/stream/items/count` | GET | 流的条目数 |
-| `/reader/api/0/preference/list` | GET | 偏好设置（静态） |
-| `/reader/api/0/preference/stream/list` | GET | 流偏好（静态） |
-| `/reader/api/0/friend/list` | GET | 好友列表（静态） |
-| `/reader/api/0/search/items/ids` | GET | 搜索条目 |
-| `/reader/subscriptions/export` | GET | 导出 OPML |
-| `/reader/subscriptions/import` | POST | 导入 OPML |
-| `/reader/api/0/sync` | POST | 手动触发一次抓取同步 |
-| `/favicon?host=xxx` | GET | favicon 代理（边缘缓存） |
+| 端点                                     | 方法     | 说明                             |
+| ---------------------------------------- | -------- | -------------------------------- |
+| `/accounts/ClientLogin`                  | GET/POST | 账号密码换取 Auth token          |
+| `/reader/api/0/auth-token`               | GET      | 获取 token                       |
+| `/reader/api/0/token`                    | GET      | 获取 token（同 auth-token）      |
+| `/reader/api/0/user-info`                | GET      | 用户信息                         |
+| `/reader/api/0/subscription/list`        | GET      | 订阅列表（含分组/标签）          |
+| `/reader/api/0/subscription/quickadd`    | POST     | 通过 URL 添加订阅                |
+| `/reader/api/0/subscription/edit`        | POST     | 订阅/取消订阅、改标题、加/删标签 |
+| `/reader/api/0/tag/list`                 | GET      | 标签列表                         |
+| `/reader/api/0/rename-tag`               | POST     | 重命名标签                       |
+| `/reader/api/0/disable-tag`              | POST     | 删除标签                         |
+| `/reader/api/0/edit-tag`                 | POST     | 已读/未读/星标/标签编辑          |
+| `/reader/api/0/mark-all-as-read`         | POST     | 全部标记已读                     |
+| `/reader/api/0/unread-count`             | GET      | 未读数统计                       |
+| `/reader/api/0/stream/contents/{stream}` | GET      | 流内容（JSON / Atom）            |
+| `/reader/api/0/stream/items/ids`         | GET      | 流的条目 ID 列表                 |
+| `/reader/api/0/stream/items/contents`    | GET/POST | 指定条目详情                     |
+| `/reader/api/0/stream/items/count`       | GET      | 流的条目数                       |
+| `/reader/api/0/preference/list`          | GET      | 偏好设置（静态）                 |
+| `/reader/api/0/preference/stream/list`   | GET      | 流偏好（静态）                   |
+| `/reader/api/0/friend/list`              | GET      | 好友列表（静态）                 |
+| `/reader/api/0/search/items/ids`         | GET      | 搜索条目                         |
+| `/reader/subscriptions/export`           | GET      | 导出 OPML                        |
+| `/reader/subscriptions/import`           | POST     | 导入 OPML                        |
+| `/reader/api/0/sync`                     | POST     | 手动触发一次抓取同步             |
+| `/favicon?host=xxx`                      | GET      | favicon 代理（边缘缓存）         |
 
 ### 常用 stream ID
 
@@ -153,14 +153,14 @@ curl -H "Authorization: GoogleLogin auth=<token>" "https://your-worker/reader/ap
 
 ## 配置项
 
-| 变量 | 说明 | 默认 |
-| --- | --- | --- |
-| `GR_USERS` | `用户名:密码`，多个用逗号分隔 | `admin:changeme123` |
-| `JWT_SECRET` | token 签名密钥，务必修改 | `change-me...` |
-| `SYNC_INTERVAL_MIN` | 抓取间隔（分钟） | `15` |
-| `MAX_FETCH_PER_CRON` | 每次 Cron 最多抓取的源数量 | `20` |
-| `MAX_ITEMS_PER_FEED` | 每个源保留的最大文章数 | `3000` |
-| `MAX_ITEM_AGE_DAYS` | 入库时跳过 N 天以前的旧条目（`0` 关闭；无日期的条目总是保留） | `90` |
+| 变量                 | 说明                                                          | 默认                |
+| -------------------- | ------------------------------------------------------------- | ------------------- |
+| `GR_USERS`           | `用户名:密码`，多个用逗号分隔                                 | `admin:changeme123` |
+| `JWT_SECRET`         | token 签名密钥，务必修改                                      | `change-me...`      |
+| `SYNC_INTERVAL_MIN`  | 抓取间隔（分钟）                                              | `15`                |
+| `MAX_FETCH_PER_CRON` | 每次 Cron 最多抓取的源数量                                    | `20`                |
+| `MAX_ITEMS_PER_FEED` | 每个源保留的最大文章数                                        | `3000`              |
+| `MAX_ITEM_AGE_DAYS`  | 入库时跳过 N 天以前的旧条目（`0` 关闭；无日期的条目总是保留） | `90`                |
 
 Cron 表达式在 `wrangler.toml` 的 `[triggers]` 中，默认每 15 分钟一次。
 

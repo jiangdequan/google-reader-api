@@ -54,7 +54,7 @@ export default {
   },
 };
 
-async function route(request, env, ctx) {
+export async function route(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method.toUpperCase();

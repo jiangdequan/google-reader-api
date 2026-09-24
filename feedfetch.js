@@ -40,6 +40,33 @@ function discoverFeedLink(html, base) {
   return null;
 }
 
+// A feed HTML page usually advertises its feed via a <link rel="alternate">;
+// when the first request returns HTML, follow that candidate once. Returns
+// { parsed, finalUrl } or null (no usable feed link / fetch failed).
+async function fetchDiscoveredFeed(html, url, finalUrl) {
+  const discovered = discoverFeedLink(html, finalUrl);
+  if (!discovered || discovered === url) return null;
+  let timer;
+  try {
+    const t = timeout(DEFAULT_FETCH_TIMEOUT_MS);
+    timer = t;
+    const resp = await fetch(discovered, {
+      headers: { 'User-Agent': UA, Accept: ACCEPT },
+      redirect: 'follow',
+      signal: t.signal,
+    });
+    if (!resp.ok) return null;
+    const body = await resp.text();
+    const parsed = parseFeed(body, resp.headers.get('content-type') || '');
+    return parsed ? { parsed, finalUrl: discovered } : null;
+  } catch (e) {
+    console.error('fetch discovered feed error', discovered, e);
+    return null;
+  } finally {
+    if (timer) timer.clear();
+  }
+}
+
 export async function fetchFeed(env, feed) {
   const url = normalizeUrl(feed.url);
   if (!url) return { error: 'bad url' };
@@ -75,27 +102,10 @@ export async function fetchFeed(env, feed) {
   let parsed = parseFeed(body, ctype);
 
   if (!parsed && (ctype.includes('html') || /<html[\s>]/i.test(body))) {
-    const discovered = discoverFeedLink(body, finalUrl);
-    if (discovered && discovered !== url) {
-      let t2;
-      try {
-        const t = timeout(DEFAULT_FETCH_TIMEOUT_MS);
-        t2 = t;
-        const r2 = await fetch(discovered, {
-          headers: { 'User-Agent': UA, Accept: ACCEPT },
-          redirect: 'follow',
-          signal: t.signal,
-        });
-        if (r2.ok) {
-          const b2 = await r2.text();
-          parsed = parseFeed(b2, r2.headers.get('content-type') || '');
-          if (parsed) finalUrl = discovered;
-        }
-      } catch (e) {
-        console.error('fetch discovered feed error', discovered, e);
-      } finally {
-        if (t2) t2.clear();
-      }
+    const found = await fetchDiscoveredFeed(body, url, finalUrl);
+    if (found) {
+      parsed = found.parsed;
+      finalUrl = found.finalUrl;
     }
   }
 
