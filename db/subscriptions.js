@@ -1,5 +1,5 @@
 import { attachLabel } from './tags.js';
-import { batchAll, SQL_CHUNK } from './util.js';
+import { rowsForIn } from './util.js';
 
 export async function addSubscription(env, userId, feedId, title, labels = []) {
   await env.DB.prepare(
@@ -73,19 +73,14 @@ export async function getSubscriptions(env, userId) {
 
 export async function latestTimestamps(env, feedIds) {
   const map = {};
-  const unique = [...new Set(feedIds)];
-  const stmts = [];
-  for (let i = 0; i < unique.length; i += SQL_CHUNK) {
-    const chunk = unique.slice(i, i + SQL_CHUNK);
-    const ph = chunk.map(() => '?').join(',');
-    stmts.push(
+  const rows = await rowsForIn(
+    env,
+    (chunk, ph) =>
       env.DB.prepare(
         `SELECT feed_id, MAX(published)*1000 AS m FROM items WHERE feed_id IN (${ph}) GROUP BY feed_id`,
       ).bind(...chunk),
-    );
-  }
-  for (const res of await batchAll(env, stmts)) {
-    for (const r of res.results || []) map[r.feed_id] = r.m;
-  }
+    [...new Set(feedIds)],
+  );
+  for (const r of rows) map[r.feed_id] = r.m;
   return map;
 }

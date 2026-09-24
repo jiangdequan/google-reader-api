@@ -1,10 +1,9 @@
+import { subscribedPredicate } from './util.js';
+
 // Shared WHERE predicates for the unread counts. Each returns { sql, args } so
 // callers can AND-combine them and keep every bind parameterized. Mirrors the
 // fragment style of db/items.js buildStreamWhere.
-const subscribed = (userId) => ({
-  sql: 'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
-  args: [userId],
-});
+const subscribed = (userId) => subscribedPredicate(userId);
 
 const notRead = (userId) => ({
   sql:

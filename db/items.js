@@ -8,7 +8,7 @@ import {
   SECONDS_PER_DAY,
   SEARCH_RESULT_LIMIT,
 } from '../constants.js';
-import { batchAll, BATCH_CHUNK, SQL_CHUNK } from './util.js';
+import { BATCH_CHUNK, rowsForIn, subscribedPredicate } from './util.js';
 import { getFeedById, getFeedByUrl } from './feeds.js';
 
 export async function resolveStreamId(env, token) {
@@ -24,89 +24,102 @@ export async function resolveStreamId(env, token) {
   return p;
 }
 
-export function buildStreamWhere(userId, stream, opts = {}) {
-  const { xtResolved = [], itResolved = [], ot, nt } = opts;
-  const labelClause = (name, tagAlias = 't', itemAlias = 'il') => ({
-    sql: `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags ${tagAlias} ON ${tagAlias}.id=st.tag_id
-                   WHERE st.user_id=? AND st.feed_id=i.feed_id AND ${tagAlias}.name=?)
-           OR EXISTS (SELECT 1 FROM item_tags ${itemAlias} WHERE ${itemAlias}.user_id=? AND ${itemAlias}.item_id=i.id AND ${itemAlias}.label=?))`,
-    args: [userId, name, userId, name],
-  });
+// ---- buildStreamWhere step fragments ------------------------------------
+// Each list helper returns clause fragments `{ sql, args }`; buildStreamWhere
+// concatenates them with AND, keeping every bind parameterized and in order.
 
-  // Per-item state predicate. Only materialized states (read/starred/broadcast/
-  // kept-unread) map to item_states; reading-list/unread apply solely as the
-  // stream itself (positive subscription EXISTS) and are no-ops as xt/it
-  // filters, so this helper returns null for them in all cases.
-  const stateClause = (state, alias = 's', negate = false) => {
-    if (state === 'read' || state === 'starred' || state === 'broadcast' || state === 'kept-unread') {
-      return {
-        sql: `${negate ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM item_states ${alias} WHERE ${alias}.user_id=? AND ${alias}.item_id=i.id AND ${alias}.state=?)`,
-        args: [userId, state],
-      };
-    }
-    return null;
+// Label predicate: the feed is tagged with `name` by the user, or the item
+// itself carries the label.
+const labelClause = (userId, name, tagAlias = 't', itemAlias = 'il') => ({
+  sql: `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags ${tagAlias} ON ${tagAlias}.id=st.tag_id
+                 WHERE st.user_id=? AND st.feed_id=i.feed_id AND ${tagAlias}.name=?)
+         OR EXISTS (SELECT 1 FROM item_tags ${itemAlias} WHERE ${itemAlias}.user_id=? AND ${itemAlias}.item_id=i.id AND ${itemAlias}.label=?))`,
+  args: [userId, name, userId, name],
+});
+
+// Per-item state predicate. Only materialized states (read/starred/broadcast/
+// kept-unread) map to item_states; reading-list/unread apply solely as the
+// stream itself (positive subscription EXISTS) and are no-ops as xt/it
+// filters, so this helper returns null for them in all cases.
+const stateClause = (userId, state, alias = 's', negate = false) => {
+  if (state !== 'read' && state !== 'starred' && state !== 'broadcast' && state !== 'kept-unread') return null;
+  return {
+    sql: `${negate ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM item_states ${alias} WHERE ${alias}.user_id=? AND ${alias}.item_id=i.id AND ${alias}.state=?)`,
+    args: [userId, state],
   };
+};
 
-  // Every subscribed feed's items form the reading-list.
-  const readingListClause = () => ({
-    sql: 'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
-    args: [userId],
-  });
+// Every subscribed feed's items form the reading-list.
+const readingListClause = (userId) => subscribedPredicate(userId);
 
-  const feedClause = (feedId) => ({
-    sql: 'i.feed_id = ?',
-    args: [feedId],
-  });
+const feedClause = (feedId) => ({ sql: 'i.feed_id = ?', args: [feedId] });
 
-  const conditions = [];
-  const add = (condition) => {
-    if (condition) conditions.push(condition);
-  };
-
-  if (stream.kind === 'feed') {
-    add(feedClause(stream.feedId));
-  } else if (stream.kind === 'label') {
-    add(labelClause(stream.name));
-  } else if (stream.kind === 'state') {
-    add(
+// The stream itself: feed / label / state, or nothing when it is unknown.
+const streamFragments = (userId, stream) => {
+  if (stream.kind === 'feed') return [feedClause(stream.feedId)];
+  if (stream.kind === 'label') return [labelClause(userId, stream.name)];
+  if (stream.kind === 'state') {
+    return [
       stream.state === 'reading-list' || stream.state === 'unread'
-        ? readingListClause()
-        : stateClause(stream.state),
-    );
+        ? readingListClause(userId)
+        : stateClause(userId, stream.state),
+    ];
   }
+  return [];
+};
 
+// xt exclusions: feed (<>) and label (NOT ...) apply in all cases; a state
+// exclusion only exists for materialized states (stateClause null otherwise).
+const exclusionFragments = (userId, xtResolved) => {
+  const f = [];
   for (const x of xtResolved) {
     if (x.kind === 'feed' && x.feedId) {
-      add({ sql: 'i.feed_id <> ?', args: [x.feedId] });
+      f.push({ sql: 'i.feed_id <> ?', args: [x.feedId] });
     } else if (x.kind === 'label') {
-      const clause = labelClause(x.name);
-      add({ sql: `NOT ${clause.sql}`, args: clause.args });
+      const clause = labelClause(userId, x.name);
+      f.push({ sql: `NOT ${clause.sql}`, args: clause.args });
     } else if (x.kind === 'state') {
-      add(stateClause(x.state, 's', true));
+      const clause = stateClause(userId, x.state, 's', true);
+      if (clause) f.push(clause);
     }
   }
+  return f;
+};
 
-  const includes = [];
+// it inclusions OR-combined into a single parenthesized predicate, or null
+// when no term matches any item.
+const inclusionFragment = (userId, itResolved) => {
+  const f = [];
   for (const t of itResolved || []) {
     if (t.kind === 'feed' && t.feedId) {
-      includes.push({
+      f.push({
         sql: 'EXISTS (SELECT 1 FROM items t2 WHERE t2.id = i.id AND t2.feed_id = ?)',
         args: [t.feedId],
       });
     } else if (t.kind === 'label') {
-      includes.push(labelClause(t.name, 'tg', 'il2'));
+      f.push(labelClause(userId, t.name, 'tg', 'il2'));
     } else if (t.kind === 'state') {
-      const clause = stateClause(t.state, 's2');
-      if (clause) includes.push(clause);
+      const clause = stateClause(userId, t.state, 's2');
+      if (clause) f.push(clause);
     }
   }
+  if (!f.length) return null;
+  return {
+    sql: `(${f.map((c) => c.sql).join(' OR ')})`,
+    args: f.flatMap((c) => c.args),
+  };
+};
 
-  if (includes.length) {
-    add({
-      sql: `(${includes.map((c) => c.sql).join(' OR ')})`,
-      args: includes.flatMap((c) => c.args),
-    });
-  }
+export function buildStreamWhere(userId, stream, opts = {}) {
+  const { xtResolved = [], itResolved = [], ot, nt } = opts;
+  const conditions = [];
+  const add = (clause) => {
+    if (clause) conditions.push(clause);
+  };
+
+  add(...streamFragments(userId, stream));
+  for (const x of exclusionFragments(userId, xtResolved)) add(x);
+  add(inclusionFragment(userId, itResolved));
 
   if (ot) add({ sql: 'i.published >= ?', args: [ot] });
   if (nt) add({ sql: 'i.published <= ?', args: [nt] });
@@ -206,19 +219,15 @@ function candidateItems(items, env) {
 // loading every stored guid of the feed into memory on each sync.
 async function storedGuids(env, feedId, items) {
   const map = new Map();
-  const checks = [];
-  for (let i = 0; i < items.length; i += SQL_CHUNK) {
-    const chunk = items.slice(i, i + SQL_CHUNK);
-    const ph = chunk.map(() => '?').join(',');
-    checks.push(
+  const rows = await rowsForIn(
+    env,
+    (chunk, ph) =>
       env.DB.prepare(
         `SELECT guid, url FROM items WHERE feed_id=? AND guid IN (${ph})`,
       ).bind(feedId, ...chunk.map((c) => c.guid)),
-    );
-  }
-  for (const res of await batchAll(env, checks)) {
-    for (const r of res.results || []) map.set(r.guid, r.url);
-  }
+    items,
+  );
+  for (const r of rows) map.set(r.guid, r.url);
   return map;
 }
 
@@ -285,42 +294,32 @@ export async function pruneFeed(env, feedId, keep = DEFAULT_MAX_ITEMS_PER_FEED) 
 
 export async function getStatesForItems(env, userId, ids) {
   const map = {};
-  const unique = [...new Set(ids)];
-  const stmts = [];
-  for (let i = 0; i < unique.length; i += SQL_CHUNK) {
-    const chunk = unique.slice(i, i + SQL_CHUNK);
-    const ph = chunk.map(() => '?').join(',');
-    stmts.push(
+  const rows = await rowsForIn(
+    env,
+    (chunk, ph) =>
       env.DB.prepare(
         `SELECT item_id, state FROM item_states WHERE user_id=? AND item_id IN (${ph})`,
       ).bind(userId, ...chunk),
-    );
-  }
-  for (const res of await batchAll(env, stmts)) {
-    for (const r of res.results || []) {
-      (map[r.item_id] = map[r.item_id] || new Set()).add(r.state);
-    }
+    [...new Set(ids)],
+  );
+  for (const r of rows) {
+    (map[r.item_id] = map[r.item_id] || new Set()).add(r.state);
   }
   return map;
 }
 
 export async function getLabelsForItems(env, userId, ids) {
   const map = {};
-  const unique = [...new Set(ids)];
-  const stmts = [];
-  for (let i = 0; i < unique.length; i += SQL_CHUNK) {
-    const chunk = unique.slice(i, i + SQL_CHUNK);
-    const ph = chunk.map(() => '?').join(',');
-    stmts.push(
+  const rows = await rowsForIn(
+    env,
+    (chunk, ph) =>
       env.DB.prepare(
         `SELECT item_id, label FROM item_tags WHERE user_id=? AND item_id IN (${ph})`,
       ).bind(userId, ...chunk),
-    );
-  }
-  for (const res of await batchAll(env, stmts)) {
-    for (const r of res.results || []) {
-      (map[r.item_id] = map[r.item_id] || []).push(r.label);
-    }
+    [...new Set(ids)],
+  );
+  for (const r of rows) {
+    (map[r.item_id] = map[r.item_id] || []).push(r.label);
   }
   return map;
 }
@@ -411,26 +410,18 @@ export async function getItemsByIds(env, ids) {
     }
     idsLong.push(v);
   }
-  const rows = [];
-  const stmts = [];
-  const build = (values, column) => {
-    for (let i = 0; i < values.length; i += SQL_CHUNK) {
-      const chunk = values.slice(i, i + SQL_CHUNK);
-      stmts.push(
+  const byColumn = (values, column) =>
+    rowsForIn(
+      env,
+      (chunk, ph) =>
         env.DB.prepare(
           `SELECT i.rowid, i.*, f.url AS feed_url, f.title AS feed_title, f.html_url AS feed_html
            FROM items i JOIN feeds f ON f.id = i.feed_id
-           WHERE i.${column} IN (${chunk.map(() => '?').join(',')})`,
+           WHERE i.${column} IN (${ph})`,
         ).bind(...chunk),
-      );
-    }
-  };
-  build(rowids, 'rowid');
-  build(idsLong, 'id');
-  for (const res of await batchAll(env, stmts)) {
-    rows.push(...(res.results || []));
-  }
-  return rows;
+      values,
+    );
+  return [...(await byColumn(rowids, 'rowid')), ...(await byColumn(idsLong, 'id'))];
 }
 
 export async function searchItems(env, userId, q, opts) {
