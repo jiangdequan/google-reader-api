@@ -56,9 +56,11 @@ export default {
       console.log(`[REQ] ${request.method} ${brief} -> ${resp.status} ${size}B`);
       return resp;
     } catch (e) {
-      console.log(`[REQ] ${request.method} ${brief} -> ERR ${(e && e.message) || e}`);
+      const err = { message: String((e && e.message) || e) };
+      console.log(`[REQ] ${request.method} ${brief} -> ERR ${err.message}`);
       console.error('handler error', (e && e.stack) || e);
-      return json({ error: ((e && e.message) || String(e)).slice(0, 500) }, 500);
+      // Never leak internals (URLs, stack traces) to clients; log is the record.
+      return json({ error: 'internal server error' }, 500);
     }
   },
 };

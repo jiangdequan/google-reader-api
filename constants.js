@@ -1,4 +1,5 @@
 export const SECONDS_PER_DAY = 86400;
+export const DEFAULT_JWT_SECRET = 'greader-secret';
 export const DEFAULT_ITEM_AGE_DAYS = 90;
 export const DEFAULT_MAX_ITEMS_PER_FEED = 3000;
 export const DEFAULT_FETCH_TIMEOUT_MS = 15000;

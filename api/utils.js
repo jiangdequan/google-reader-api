@@ -1,42 +1,32 @@
-import { b64urlEncode, b64urlDecode, escapeHtml, xml } from '../util.js';
+import { b64urlEncode, b64urlDecode, decodeURIComponentSafe, escapeHtml, xml } from '../util.js';
 import { getItemsByIds, resolveStreamId, setItemLabel, setItemState } from '../db/items.js';
 import { getFeedById } from '../db/feeds.js';
+import { parseStreamId, serializeStreamId } from '../streamid.js';
 
+export { decodeURIComponentSafe };
+
+// A "label" term is either a canonical user/-/(label|tag|tags)/<name> stream id
+// or a bare name; state/feed and other user-prefixed ids are not labels at all.
 export function stripLabel(term) {
-  let s = String(term || '').trim();
-  const m = s.match(/^user\/-\/(label|tag|tags)\/(.+)$/);
-  if (m) return decodeURIComponentSafe(m[2]);
-  if (s.startsWith('user/')) {
-    const m2 = s.replace(/^user\/[^/]+\//, 'user/-/').match(/^user\/-\/(label|tag|tags)\/(.+)$/);
-    if (m2) return decodeURIComponentSafe(m2[2]);
-    return '';
-  }
+  const s = String(term || '').trim();
+  const p = parseStreamId(s);
+  if (p.kind === 'label') return p.name;
+  if (p.kind === 'state' || p.userPrefixed) return '';
   return decodeURIComponentSafe(s);
 }
 
-export function decodeURIComponentSafe(s) {
-  try {
-    return decodeURIComponent(s);
-  } catch (e) {
-    // Client-supplied ids with stray % just pass through.
-    return s;
-  }
-}
-
 function tagObject(term) {
-  let s = String(term || '').trim();
-  if (s.startsWith('user/')) {
-    s = s.replace(/^user\/[^/]+\//, 'user/-/');
-    const state = s.match(/^user\/-\/state\/com\.google\/(.+)$/);
-    if (state) return { kind: 'state', state: state[1] };
-    const label = s.match(/^user\/-\/(label|tag|tags)\/(.+)$/);
-    if (label) return { kind: 'label', name: decodeURIComponentSafe(label[2]) };
-    return { kind: 'none' };
-  }
-  if (s.startsWith('feed/')) return { kind: 'none' };
+  const s = String(term || '').trim();
   if (!s) return { kind: 'none' };
+  const p = parseStreamId(s);
+  if (p.kind === 'feed') return { kind: 'none' };
+  if (p.kind === 'state') return p.state ? { kind: 'state', state: p.state } : { kind: 'none' };
+  if (p.kind === 'label') return p.name ? { kind: 'label', name: p.name } : { kind: 'none' };
+  if (p.feedPrefixed || p.userPrefixed) return { kind: 'none' };
   return { kind: 'label', name: decodeURIComponentSafe(s) };
 }
+
+export const canonicalStreamId = serializeStreamId;
 
 export async function applyTag(env, user, itemId, term, on) {
   const t = tagObject(term);
@@ -118,12 +108,6 @@ export function cursorDec(c) {
   } catch (e) {
     return null;
   }
-}
-
-export function canonicalStreamId(stream, uid) {
-  if (stream.kind === 'feed') return 'feed/' + stream.url;
-  if (stream.kind === 'label') return `user/-/label/${stream.name}`;
-  return `user/-/state/com.google/${stream.state}`;
 }
 
 export async function streamTitle(env, stream, uid, username) {

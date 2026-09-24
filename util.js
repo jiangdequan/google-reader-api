@@ -55,9 +55,10 @@ export function toHex(buf) {
 }
 
 export async function hmacHex(secret, data) {
+  if (!secret) throw new Error('hmacHex requires a secret');
   const key = await crypto.subtle.importKey(
     'raw',
-    enc.encode(secret || 'greader-secret'),
+    enc.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
@@ -92,6 +93,15 @@ export function parseDate(s) {
   if (!s) return 0;
   const t = Date.parse(String(s).trim());
   return Number.isNaN(t) ? 0 : Math.floor(t / 1000);
+}
+
+export function decodeURIComponentSafe(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch (e) {
+    // Client-supplied ids with stray % just pass through.
+    return s;
+  }
 }
 
 export function now() {

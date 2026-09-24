@@ -1,4 +1,5 @@
 import { now, sha1Hex } from '../util.js';
+import { parseStreamId } from '../streamid.js';
 import {
   DEFAULT_ITEM_AGE_DAYS,
   DEFAULT_MAX_ITEMS_PER_FEED,
@@ -11,26 +12,16 @@ import { batchAll, BATCH_CHUNK, SQL_CHUNK } from './util.js';
 import { getFeedById, getFeedByUrl } from './feeds.js';
 
 export async function resolveStreamId(env, token) {
-  let s = String(token || '').trim();
-  s = s.replace(/^feed\/(http[s]?):\/([^/])/, '$1://$$2');
-  s = s.replace(/^user\/[^/]+\//, 'user/-/');
-  if (/^feed\/\d+$/.test(s)) {
-    const fid = Number(s.slice(5));
-    const f = await getFeedById(env, fid);
-    return { kind: 'feed', url: f ? f.url : '', feedId: f ? f.id : fid };
+  const p = parseStreamId(token);
+  if (p.kind === 'feed' && p.feedId !== undefined) {
+    const f = await getFeedById(env, p.feedId);
+    return { kind: 'feed', url: f ? f.url : '', feedId: f ? f.id : p.feedId };
   }
-  if (s.startsWith('feed/http') || s.startsWith('feed/https')) {
-    const url = s.slice(5);
-    const f = await getFeedByUrl(env, url);
-    return { kind: 'feed', url, feedId: f ? f.id : 0 };
+  if (p.kind === 'feed') {
+    const f = await getFeedByUrl(env, p.url);
+    return { kind: 'feed', url: p.url, feedId: f ? f.id : 0 };
   }
-  if (s.startsWith('user/-/state/com.google/')) {
-    return { kind: 'state', state: s.replace(/^user\/-\/state\/com\.google\//, '') };
-  }
-  if (s.startsWith('user/-/label/')) {
-    return { kind: 'label', name: s.replace(/^user\/-\/label\//, '') };
-  }
-  return { kind: 'unknown' };
+  return p;
 }
 
 export function buildStreamWhere(userId, stream, opts = {}) {

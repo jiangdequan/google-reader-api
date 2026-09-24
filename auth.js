@@ -1,12 +1,25 @@
 import { getUserById, verifyPassword } from './db/users.js';
 import { b64urlEncode, b64urlDecode, hmacHex, text } from './util.js';
+import { DEFAULT_JWT_SECRET } from './constants.js';
 
 const TOKEN_TTL = 30 * 24 * 3600;
+const warnedSecret = new WeakSet();
+
+function jwtSecret(env) {
+  const secret = env.JWT_SECRET || DEFAULT_JWT_SECRET;
+  if (!env.JWT_SECRET && !warnedSecret.has(env)) {
+    warnedSecret.add(env);
+    console.warn(
+      'JWT_SECRET is not set; falling back to built-in default. Tokens are forgeable — bind a strong JWT_SECRET.',
+    );
+  }
+  return secret;
+}
 
 export async function issueToken(env, userId) {
   const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL;
   const payload = `${userId}:${exp}`;
-  const sig = await hmacHex(env.JWT_SECRET || 'greader-secret', payload);
+  const sig = await hmacHex(jwtSecret(env), payload);
   return b64urlEncode(payload) + '.' + b64urlEncode(sig);
 }
 
@@ -17,7 +30,7 @@ export async function parseToken(env, token) {
     const payload = b64urlDecode(p);
     const [userId, expStr] = payload.split(':');
     if (!userId || !expStr || Number(expStr) < Math.floor(Date.now() / 1000)) return null;
-    const expected = await hmacHex(env.JWT_SECRET || 'greader-secret', payload);
+    const expected = await hmacHex(jwtSecret(env), payload);
     if (expected !== b64urlDecode(s)) return null;
     return userId;
   } catch (e) {
