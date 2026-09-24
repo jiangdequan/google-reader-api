@@ -69,14 +69,17 @@ test('buildStreamWhere: state stream materializes reading-list as subscription e
 test('buildStreamWhere: concrete state maps to item_states', () => {
   const { where, args } = buildStreamWhere(USER, { kind: 'state', state: 'read' });
   assert.deepEqual(args, [USER, 'read']);
-  assert.match(where, /EXISTS \(SELECT 1 FROM item_states s WHERE s\.user_id=\? AND s\.item_id=i\.id AND s\.state=\?\)/);
+  assert.match(
+    where,
+    /EXISTS \(SELECT 1 FROM item_states s WHERE s\.user_id=\? AND s\.item_id=i\.id AND s\.state=\?\)/,
+  );
 });
 
 test('buildStreamWhere: xt state reading-list/unread is a no-op (regression guard)', () => {
   const { where, args } = buildStreamWhere(
     USER,
     { kind: 'state', state: 'read' },
-    [{ kind: 'state', state: 'unread' }],
+    { xtResolved: [{ kind: 'state', state: 'unread' }] },
   );
   assert.deepEqual(args, [USER, 'read']);
   assert.doesNotMatch(where, /NOT EXISTS/);
@@ -88,20 +91,20 @@ test('buildStreamWhere: xt concrete state negates item_states', () => {
   const { where, args } = buildStreamWhere(
     USER,
     { kind: 'state', state: 'starred' },
-    [{ kind: 'state', state: 'read' }],
+    { xtResolved: [{ kind: 'state', state: 'read' }] },
   );
   assert.deepEqual(args, [USER, 'starred', USER, 'read']);
-  assert.match(where, /NOT EXISTS \(SELECT 1 FROM item_states s WHERE s\.user_id=\? AND s\.item_id=i\.id AND s\.state=\?\)/);
+  assert.match(
+    where,
+    /NOT EXISTS \(SELECT 1 FROM item_states s WHERE s\.user_id=\? AND s\.item_id=i\.id AND s\.state=\?\)/,
+  );
 });
 
 test('buildStreamWhere: it state reading-list/unread adds no OR-branch (regression guard)', () => {
   const { where, args } = buildStreamWhere(
     USER,
     { kind: 'feed', feedId: 7 },
-    [],
-    null,
-    null,
-    [{ kind: 'state', state: 'unread' }],
+    { itResolved: [{ kind: 'state', state: 'unread' }] },
   );
   assert.equal(norm(where), 'WHERE i.feed_id = ?');
   assert.deepEqual(args, [7]);
@@ -111,13 +114,13 @@ test('buildStreamWhere: it starved state uses s2 alias inside OR group', () => {
   const { where, args } = buildStreamWhere(
     USER,
     { kind: 'feed', feedId: 7 },
-    [],
-    null,
-    null,
-    [{ kind: 'state', state: 'starred' }],
+    { itResolved: [{ kind: 'state', state: 'starred' }] },
   );
   assert.deepEqual(args, [7, USER, 'starred']);
-  assert.match(where, /\(EXISTS \(SELECT 1 FROM item_states s2 WHERE s2\.user_id=\? AND s2\.item_id=i\.id AND s2\.state=\?\)\)/);
+  assert.match(
+    where,
+    /\(EXISTS \(SELECT 1 FROM item_states s2 WHERE s2\.user_id=\? AND s2\.item_id=i\.id AND s2\.state=\?\)\)/,
+  );
 });
 
 test('buildStreamWhere: label stream and xt-label exclusion', () => {
@@ -129,13 +132,13 @@ test('buildStreamWhere: label stream and xt-label exclusion', () => {
   const { where: xw } = buildStreamWhere(
     USER,
     { kind: 'state', state: 'reading-list' },
-    [{ kind: 'label', name: 'dev' }],
+    { xtResolved: [{ kind: 'label', name: 'dev' }] },
   );
   assert.match(xw, /NOT \(EXISTS \(SELECT 1 FROM subscription_tags/);
 });
 
 test('buildStreamWhere: time bounds are ANDed in arg order', () => {
-  const { where, args } = buildStreamWhere(USER, { kind: 'feed', feedId: 1 }, [], 100, 200);
+  const { where, args } = buildStreamWhere(USER, { kind: 'feed', feedId: 1 }, { ot: 100, nt: 200 });
   assert.deepEqual(args, [1, 100, 200]);
   assert.equal(norm(where), 'WHERE i.feed_id = ? AND i.published >= ? AND i.published <= ?');
 });
@@ -202,7 +205,10 @@ test('insertNewItems: inserts new, backfills url for stored empty-url, honors MA
   assert.equal(added, 2);
   const inserts = db.plan.filter((p) => p.sql.includes('INSERT OR IGNORE INTO items'));
   assert.equal(inserts.length, 2);
-  assert.deepEqual(inserts.map((i) => i.args[3]), ['', '', 'http://f/c.html'].slice(0, 2)); // rows a,b; c backfilled not inserted
+  assert.deepEqual(
+    inserts.map((i) => i.args[3]),
+    ['', '', 'http://f/c.html'].slice(0, 2),
+  ); // rows a,b; c backfilled not inserted
 
   const updates = db.plan.filter((p) => p.sql.includes('UPDATE items SET url='));
   assert.equal(updates.length, 1);
@@ -213,7 +219,11 @@ test('insertNewItems: published=0 always kept, chunked into BATCH_CHUNK batches'
   const db = new FakeDB({ onAll: () => [] });
   const env = { DB: db, MAX_ITEM_AGE_DAYS: '10' };
   const ts = Math.floor(Date.now() / 1000);
-  const items = Array.from({ length: 100 }, (_, k) => ({ guid: 'g' + k, title: 't' + k, published: k % 2 ? 0 : ts - 1000000 }));
+  const items = Array.from({ length: 100 }, (_, k) => ({
+    guid: 'g' + k,
+    title: 't' + k,
+    published: k % 2 ? 0 : ts - 1000000,
+  }));
   const added = await insertNewItems(env, 1, 'http://f/', items);
 
   assert.equal(added, 50); // odd indexes (published=0) kept, even (old) dropped
@@ -249,7 +259,10 @@ test('markStreamRead: read-selection SQL matches buildStreamWhere + time bound',
   const n = await markStreamRead({ DB: db }, USER, { kind: 'state', state: 'reading-list' }, 1700000000000000);
 
   const q = db.plan[0];
-  assert.equal(norm(q.sql), 'SELECT i.id FROM items i WHERE EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id) AND i.published <= ? ORDER BY i.published DESC LIMIT 10000');
+  assert.equal(
+    norm(q.sql),
+    'SELECT i.id FROM items i WHERE EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id) AND i.published <= ? ORDER BY i.published DESC LIMIT 10000',
+  );
   assert.deepEqual(q.args, [USER, 1700000000]);
   const inserts = db.plan.filter((p) => p.sql.includes('INSERT OR IGNORE INTO item_states'));
   assert.equal(inserts.length, 2);
