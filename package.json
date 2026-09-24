@@ -1,8 +1,21 @@
 {
   "name": "googlereaderapi",
   "private": true,
+  "description": "Google Reader API-compatible RSS reader backend built on Cloudflare Workers + D1",
   "type": "module",
   "scripts": {
+    "start:gr": "wrangler dev --local --env staging index.js -c wrangler.toml --ip 0.0.0.0",
+    "deploy": "wrangler deploy --env production index.js -c wrangler.toml",
     "test": "node --test test/*.test.mjs"
+  },
+  "author": "jiangdequan <jiangdequan1314@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "miniflare": "^3.20231218.0",
+    "prettier": "^1.18.2",
+    "wrangler": "^4.134.0"
+  },
+  "dependencies": {
+    "serverless-cloudflare-workers": "^1.2.0"
   }
 }
