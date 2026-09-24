@@ -1,4 +1,4 @@
-import { SQL_CHUNK } from './util.js';
+import { BATCH_CHUNK, SQL_CHUNK } from './util.js';
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -120,8 +120,8 @@ async function normalizeStateKeys(env) {
       );
       stmts.push(env.DB.prepare('DELETE FROM item_tags WHERE item_id = ?').bind(legacy));
     }
-    for (let j = 0; j < stmts.length; j += 80) {
-      await env.DB.batch(stmts.slice(j, j + 80));
+    for (let j = 0; j < stmts.length; j += BATCH_CHUNK) {
+      await env.DB.batch(stmts.slice(j, j + BATCH_CHUNK));
     }
   }
 }

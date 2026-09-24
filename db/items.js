@@ -1,5 +1,5 @@
 import { now, sha1Hex } from '../util.js';
-import { batchAll, SQL_CHUNK } from './util.js';
+import { batchAll, BATCH_CHUNK, SQL_CHUNK } from './util.js';
 import { getFeedById, getFeedByUrl } from './feeds.js';
 
 export async function resolveStreamId(env, token) {
@@ -33,13 +33,11 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
     args: [userId, name, userId, name],
   });
 
+  // Per-item state predicate. Only materialized states (read/starred/broadcast/
+  // kept-unread) map to item_states; reading-list/unread apply solely as the
+  // stream itself (positive subscription EXISTS) and are no-ops as xt/it
+  // filters, so this helper returns null for them in all cases.
   const stateClause = (state, alias = 's', negate = false) => {
-    if (state === 'reading-list' || state === 'unread') {
-      return {
-        sql: 'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
-        args: [userId],
-      };
-    }
     if (state === 'read' || state === 'starred' || state === 'broadcast' || state === 'kept-unread') {
       return {
         sql: `${negate ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM item_states ${alias} WHERE ${alias}.user_id=? AND ${alias}.item_id=i.id AND ${alias}.state=?)`,
@@ -48,6 +46,12 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
     }
     return null;
   };
+
+  // Every subscribed feed's items form the reading-list.
+  const readingListClause = () => ({
+    sql: 'EXISTS (SELECT 1 FROM subscriptions su WHERE su.user_id=? AND su.feed_id=i.feed_id)',
+    args: [userId],
+  });
 
   const feedClause = (feedId) => ({
     sql: 'i.feed_id = ?',
@@ -64,7 +68,11 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
   } else if (stream.kind === 'label') {
     add(labelClause(stream.name));
   } else if (stream.kind === 'state') {
-    add(stateClause(stream.state));
+    add(
+      stream.state === 'reading-list' || stream.state === 'unread'
+        ? readingListClause()
+        : stateClause(stream.state),
+    );
   }
 
   for (const x of xtResolved || []) {
@@ -74,10 +82,7 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
       const clause = labelClause(x.name);
       add({ sql: `NOT ${clause.sql}`, args: clause.args });
     } else if (x.kind === 'state') {
-      const clause = stateClause(x.state, 's', true);
-      if (clause && !(x.state === 'reading-list' || x.state === 'unread')) {
-        add(clause);
-      }
+      add(stateClause(x.state, 's', true));
     }
   }
 
@@ -92,9 +97,7 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
       includes.push(labelClause(t.name, 'tg', 'il2'));
     } else if (t.kind === 'state') {
       const clause = stateClause(t.state, 's2');
-      if (clause && !(t.state === 'reading-list' || t.state === 'unread')) {
-        includes.push(clause);
-      }
+      if (clause) includes.push(clause);
     }
   }
 
@@ -125,28 +128,31 @@ export async function getItemsStream(env, userId, stream, opts) {
   const desc = opts.order !== 'o';
   const order = `i.published ${desc ? 'DESC' : 'ASC'}, i.id ${desc ? 'DESC' : 'ASC'}`;
   const limit = opts.limit || 20;
-  let conds = where;
-  const a = [...args];
+
+  // Collect WHERE clauses and their bound params first, then append LIMIT/OFFSET.
+  // Cursor pins an exact (published, id) pair and supersedes offset.
+  const clauses = where ? [where.replace(/^\s*WHERE\s+/, '')] : [];
+  const params = [...args];
   let tail = ` ORDER BY ${order} LIMIT ?`;
   if (opts.cursor) {
-    const c = opts.cursor;
+    const { published, id } = opts.cursor;
     const op = desc ? '<' : '>';
-    conds +=
-      (conds ? ' AND ' : ' WHERE ') +
-      `(i.published ${op} ? OR (i.published = ? AND i.id ${op} ?))`;
-    a.push(c.published, c.published, c.id, limit + 1);
+    clauses.push(`(i.published ${op} ? OR (i.published = ? AND i.id ${op} ?))`);
+    params.push(published, published, id, limit + 1);
   } else if (opts.offset) {
     tail += ' OFFSET ?';
-    a.push(limit + 1, opts.offset);
+    params.push(limit + 1, opts.offset);
   } else {
-    a.push(limit + 1);
+    params.push(limit + 1);
   }
+  const conds = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
+
   if (opts.refsOnly) {
     // stream/items/ids only needs ids + timestamps; skip the feed join and payload columns.
     const res = await env.DB.prepare(
       `SELECT i.rowid, i.id, i.published, i.timestamp_usec FROM items i ${conds}${tail}`,
     )
-      .bind(...a)
+      .bind(...params)
       .all();
     const rows = (res.results || []).slice(0, limit);
     return { rows, hasMore: (res.results || []).length > limit };
@@ -156,7 +162,7 @@ export async function getItemsStream(env, userId, stream, opts) {
      FROM items i JOIN feeds f ON f.id = i.feed_id
      ${conds}${tail}`,
   )
-    .bind(...a)
+    .bind(...params)
     .all();
   return {
     rows: (res.results || []).slice(0, limit),
@@ -198,11 +204,10 @@ export async function latestStreamItem(env, userId, stream, opts) {
   return r ? r.m || 0 : 0;
 }
 
-export async function insertNewItems(env, feedId, feedUrl, items) {
-  if (!items.length) return 0;
-  // Skip entries older than MAX_ITEM_AGE_DAYS (default 90). Entries without a
-  // publish date (published=0) are always kept, otherwise feeds without dates
-  // would silently end up empty.
+// Keep items at most MAX_ITEM_AGE_DAYS old (default 90). Entries without a
+// publish date (published=0) are always kept, otherwise feeds without dates
+// would silently end up empty. Also de-duplicates candidates by guid.
+function candidateItems(items, env) {
   const maxAge = Number(env.MAX_ITEM_AGE_DAYS) || 90;
   const cutoff = maxAge > 0 ? now() - maxAge * 86400 : 0;
   const candidates = [];
@@ -214,13 +219,16 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
     seen.add(it.guid);
     candidates.push(it);
   }
-  if (!candidates.length) return 0;
-  // Only check existence for the incoming guids (chunked), instead of loading
-  // every stored guid of the feed into memory on each sync.
-  const existingMap = new Map();
+  return candidates;
+}
+
+// Load stored (guid -> url) only for the incoming guids, chunked, instead of
+// loading every stored guid of the feed into memory on each sync.
+async function storedGuids(env, feedId, items) {
+  const map = new Map();
   const checks = [];
-  for (let i = 0; i < candidates.length; i += SQL_CHUNK) {
-    const chunk = candidates.slice(i, i + SQL_CHUNK);
+  for (let i = 0; i < items.length; i += SQL_CHUNK) {
+    const chunk = items.slice(i, i + SQL_CHUNK);
     const ph = chunk.map(() => '?').join(',');
     checks.push(
       env.DB.prepare(
@@ -229,16 +237,24 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
     );
   }
   for (const res of await batchAll(env, checks)) {
-    for (const r of res.results || []) existingMap.set(r.guid, r.url);
+    for (const r of res.results || []) map.set(r.guid, r.url);
   }
+  return map;
+}
+
+export async function insertNewItems(env, feedId, feedUrl, items) {
+  if (!items.length) return 0;
+  const candidates = candidateItems(items, env);
+  if (!candidates.length) return 0;
+
+  const existing = await storedGuids(env, feedId, candidates);
   const rows = [];
   const backfill = [];
   const tsNow = now() * 1000000;
   for (const it of candidates) {
-    if (!existingMap.has(it.guid)) {
-      const id = 'tag:google.com,2005:reader/item/' + (await sha1Hex(feedUrl + '\u0000' + it.guid));
+    if (!existing.has(it.guid)) {
       rows.push({
-        id,
+        id: 'tag:google.com,2005:reader/item/' + (await sha1Hex(feedUrl + '\u0000' + it.guid)),
         guid: it.guid,
         url: it.url || '',
         title: it.title || '',
@@ -249,10 +265,12 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
         timestamp_usec: String(it.published > 0 ? it.published * 1000000 : tsNow),
         crawl_time: Date.now(),
       });
-    } else if (it.url && !existingMap.get(it.guid)) {
+    } else if (it.url && !existing.get(it.guid)) {
+      // The feed now provides a URL for an item that was stored without one.
       backfill.push(env.DB.prepare('UPDATE items SET url=? WHERE feed_id=? AND guid=?').bind(it.url, feedId, it.guid));
     }
   }
+
   const stmt = env.DB.prepare(
     `INSERT OR IGNORE INTO items(id,feed_id,guid,url,title,author,content,enclosure,published,timestamp_usec,crawl_time)
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
@@ -260,12 +278,11 @@ export async function insertNewItems(env, feedId, feedUrl, items) {
   const binds = rows.map((r) =>
     stmt.bind(r.id, feedId, r.guid, r.url, r.title, r.author, r.content, r.enclosure, r.published, r.timestamp_usec, r.crawl_time),
   );
-  for (let i = 0; i < binds.length; i += 80) {
-    await env.DB.batch(binds.slice(i, i + 80));
+  for (let i = 0; i < binds.length; i += BATCH_CHUNK) {
+    await env.DB.batch(binds.slice(i, i + BATCH_CHUNK));
   }
-  for (let i = 0; i < backfill.length; i += 80) {
-    const batch = [...backfill.slice(i, i + 80), env.DB.prepare('SELECT 1')];
-    await env.DB.batch(batch.slice(0, 90));
+  for (let i = 0; i < backfill.length; i += BATCH_CHUNK) {
+    await env.DB.batch([...backfill.slice(i, i + BATCH_CHUNK), env.DB.prepare('SELECT 1')]);
   }
   return rows.length;
 }
@@ -380,8 +397,8 @@ export async function markStreamRead(env, userId, stream, tsUsec) {
       'INSERT OR IGNORE INTO item_states(user_id, item_id, state) VALUES (?,?,?)',
     ).bind(userId, id, 'read'),
   );
-  for (let i = 0; i < stmts.length; i += 80) {
-    await env.DB.batch(stmts.slice(i, i + 80));
+  for (let i = 0; i < stmts.length; i += BATCH_CHUNK) {
+    await env.DB.batch(stmts.slice(i, i + BATCH_CHUNK));
   }
   return ids.length;
 }
