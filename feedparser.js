@@ -11,6 +11,7 @@ import { parseDate } from './util.js';
 
 export function parseFeed(body, contentType) {
   const trimmed = (body || '').trim();
+  // Empty body is not a feed; caller decides policy (e.g. re-fetch later).
   if (!trimmed) return null;
   if (trimmed.startsWith('{') || (contentType || '').includes('json')) {
     return parseJsonFeed(trimmed);
@@ -21,7 +22,14 @@ export function parseFeed(body, contentType) {
   if (ln === 'feed') return parseAtom(root);
   if (ln === 'rss') return parseRss2(root);
   if (ln === 'RDF' || ln === 'rdf') return parseRss1(root);
+  // Well-formed XML that is none of the known feed formats is rejected.
   return null;
+}
+
+// First truthy of `values`, or ''. Shared by rss/json/jsonfeed field picks so
+// every "a || b || c" fallback chain (guid, content, author) lives in one place.
+function firstText(...values) {
+  return values.find((v) => v) || '';
 }
 
 function parseAtom(root) {
@@ -80,7 +88,7 @@ function parseAtom(root) {
     const updated = parseDate(childText(entry, 'updated') || childText(entry, 'modified'));
 
     return {
-      guid: id || url,
+      guid: firstText(id, url),
       url,
       title: childText(entry, 'title'),
       author: authorName ? (authorName.text || '').trim() : '',
@@ -124,22 +132,30 @@ function itemToRssItem(item) {
   const link = childText(item, 'link');
   const encoded = childText(item, 'encoded');
   const desc = childText(item, 'description');
-  const content = encoded || desc || '';
+  const content = firstText(encoded, desc);
   let enclosure = '';
   const enc = firstOf(item, 'enclosure');
   if (enc) enclosure = attr(enc, 'url') || '';
   const published =
     parseDate(childText(item, 'pubDate')) || parseDate(childText(item, 'date'));
   return {
-    guid: guid || link,
+    guid: firstText(guid, link),
     url: link,
     title: childText(item, 'title'),
-    author: childText(item, 'creator') || childText(item, 'author'),
+    author: firstText(childText(item, 'creator'), childText(item, 'author')),
     content,
     enclosure,
     published,
     updated: published,
   };
+}
+
+// JSON Feed author may be a string or an object {name,url,...}; the shared
+// shape also folds into firstText's fallback chain for other formats.
+function pickJsonAuthor(author) {
+  if (!author) return '';
+  if (typeof author === 'string') return author;
+  return author.name || author.url || '';
 }
 
 function parseJsonFeed(body) {
@@ -149,11 +165,11 @@ function parseJsonFeed(body) {
       .map((it) => {
         const att = it.attachments && it.attachments[0] ? it.attachments[0] : null;
         return {
-          guid: it.id || it.url,
+          guid: firstText(it.id, it.url),
           url: it.url || '',
           title: it.title || '',
-          author: it.author && (it.author.name || it.author.url || '') ? it.author.name || it.author.url || '' : (it.author && typeof it.author === 'string' ? it.author : ''),
-          content: it.content_html || it.content_text || it.summary || '',
+          author: pickJsonAuthor(it.author),
+          content: firstText(it.content_html, it.content_text, it.summary),
           enclosure: att ? att.url : '',
           published: parseDate(it.date_published) || parseDate(it.date_modified),
           updated: parseDate(it.date_modified) || parseDate(it.date_published),
@@ -168,6 +184,7 @@ function parseJsonFeed(body) {
       items,
     };
   } catch (e) {
+    // Not valid JSON (or not a JSON feed worth returning); caller re-fetches.
     return null;
   }
 }

@@ -1,6 +1,9 @@
 import { now, randomHex, sha256Hex } from '../util.js';
 
 export async function hashPassword(password, salt) {
+  // Single-round sha256(salt:password). Self-hosted deployments trade KDF cost
+  // factor for CPU/battery simplicity — acceptable for low-value personal
+  // account creds; deliberately not bcrypt/argon2 (see code-review P2-1).
   return await sha256Hex(salt + ':' + password);
 }
 

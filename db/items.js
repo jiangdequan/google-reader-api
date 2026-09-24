@@ -31,9 +31,11 @@ export async function resolveStreamId(env, token) {
 // Label predicate: the feed is tagged with `name` by the user, or the item
 // itself carries the label.
 const labelClause = (userId, name, tagAlias = 't', itemAlias = 'il') => ({
-  sql: `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags ${tagAlias} ON ${tagAlias}.id=st.tag_id
-                 WHERE st.user_id=? AND st.feed_id=i.feed_id AND ${tagAlias}.name=?)
-         OR EXISTS (SELECT 1 FROM item_tags ${itemAlias} WHERE ${itemAlias}.user_id=? AND ${itemAlias}.item_id=i.id AND ${itemAlias}.label=?))`,
+  sql:
+    `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags ${tagAlias} ON ${tagAlias}.id=st.tag_id
+                 WHERE st.user_id=? AND st.feed_id=i.feed_id AND ${tagAlias}.name=?)` +
+    ` OR EXISTS (SELECT 1 FROM item_tags ${itemAlias} WHERE ${itemAlias}.user_id=?` +
+    ` AND ${itemAlias}.item_id=i.id AND ${itemAlias}.label=?))`,
   args: [userId, name, userId, name],
 });
 
@@ -44,7 +46,9 @@ const labelClause = (userId, name, tagAlias = 't', itemAlias = 'il') => ({
 const stateClause = (userId, state, alias = 's', negate = false) => {
   if (state !== 'read' && state !== 'starred' && state !== 'broadcast' && state !== 'kept-unread') return null;
   return {
-    sql: `${negate ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM item_states ${alias} WHERE ${alias}.user_id=? AND ${alias}.item_id=i.id AND ${alias}.state=?)`,
+    sql:
+      `${negate ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM item_states ${alias} WHERE ${alias}.user_id=?` +
+      ` AND ${alias}.item_id=i.id AND ${alias}.state=?)`,
     args: [userId, state],
   };
 };

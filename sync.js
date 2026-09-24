@@ -48,7 +48,8 @@ export async function fetchAndStoreFeed(env, feed) {
   const feedId = stored.id;
   // 只插入新增条目(按 guid 去重、可跳过过期条目),返回本次新增条数。
   const added = await insertNewItems(env, feedId, meta.finalUrl, res.items);
-  // 裁剪:把该 feed 保留到 MAX_ITEMS_PER_FEED(默认 DEFAULT_MAX_ITEMS_PER_FEED)条,同时清理孤儿 state/tag。
+  // 裁剪:把该 feed 保留到 MAX_ITEMS_PER_FEED(默认 DEFAULT_MAX_ITEMS_PER_FEED)条,同时清理孤儿
+  // state/tag。
   const keep = Number(env.MAX_ITEMS_PER_FEED) || DEFAULT_MAX_ITEMS_PER_FEED;
   await pruneFeed(env, feedId, keep);
   // 记录抓取结果,供下一次 304 条件请求使用。

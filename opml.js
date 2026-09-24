@@ -6,7 +6,8 @@ export function buildOpml(title, groups) {
   for (const g of groups) {
     const feeds = (g.feeds || []).map(
       (f) =>
-        `    <outline type="rss" text="${escapeAttr(f.title)}" title="${escapeAttr(f.title)}" xmlUrl="${escapeAttr(f.xmlUrl)}"${f.htmlUrl ? ` htmlUrl="${escapeAttr(f.htmlUrl)}"` : ''}/>`,
+        `    <outline type="rss" text="${escapeAttr(f.title)}" title="${escapeAttr(f.title)}"` +
+        ` xmlUrl="${escapeAttr(f.xmlUrl)}"${f.htmlUrl ? ` htmlUrl="${escapeAttr(f.htmlUrl)}"` : ''}/>`,
     );
     if (feeds.length === 0) continue;
     if (g.name) {

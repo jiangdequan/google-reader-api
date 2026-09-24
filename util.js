@@ -1,3 +1,7 @@
+// Infrastructure layer: shared primitives (response builders, base64url/hex
+// codecs, crypto wrappers, escaping, dates/times). Deliberately a grab-bag —
+// splitting further would tax every consumer with extra imports for little
+// cohesion gain; keep new additions here only when cross-cutting.
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 

@@ -33,7 +33,7 @@ export async function buildStreamOpts(
   const opts = {
     order: url.searchParams.get('r') || '',
     limit: clampInt(url.searchParams.get('n'), 20, 1, maxLimit),
-    offset: contDec(url.searchParams.get('c')),
+    offset: continuationOffsetDec(url.searchParams.get('c')),
     cursor: cursorDec(url.searchParams.get('c')),
     xtResolved,
     itResolved,
@@ -44,7 +44,9 @@ export async function buildStreamOpts(
   return opts;
 }
 
-export function contDec(c) {
+// Decodes the legacy v1 "offset" continuation token (older clients). Distinct
+// from cursorDec/cursorEnc above, which encode full v2 sort cursors.
+export function continuationOffsetDec(c) {
   if (!c) return 0;
   try {
     const s = b64urlDecode(String(c));
@@ -75,6 +77,8 @@ export function iconUrl(origin, url) {
     const host = new URL(url).host;
     return `${origin}/favicon?host=${encodeURIComponent(host)}`;
   } catch (e) {
+    // Unparseable url (null/empty/garbage) has no host; the caller treats the
+    // empty string as "no icon" and omits the field.
     return '';
   }
 }
