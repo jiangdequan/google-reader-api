@@ -1,8 +1,7 @@
 import { text, xml } from '../util.js';
 import { buildOpml, parseOpml } from '../opml.js';
 import { addSubscription, getSubscriptions, hasSubscription } from '../db/subscriptions.js';
-import { getFeedByUrl } from '../db/feeds.js';
-import { fetchAndStoreFeed } from '../sync.js';
+import { ensureFeed } from '../sync.js';
 
 export async function exportOpml(request, env, user) {
   const subs = await getSubscriptions(env, user.id);
@@ -38,7 +37,8 @@ export async function importOpml(request, env, user) {
       const form = new URLSearchParams(raw);
       xmlStr = form.get('file') || form.get('opml') || raw;
     } catch (e) {
-      /* keep raw */
+      // Request body is raw OPML, not form-encoded; keep it as-is.
+      console.warn('opml import: body not form-encoded, using raw', e && e.message);
     }
   }
   const feeds = parseOpml(xmlStr);
@@ -50,12 +50,7 @@ export async function importOpml(request, env, user) {
     } catch (e) {
       continue;
     }
-    let feed = await getFeedByUrl(env, url);
-    if (!feed) {
-      const res = await fetchAndStoreFeed(env, { url, id: 0, etag: '', updated: 0, title: f.title || '' });
-      if (res.error || !res.feedId) continue;
-      feed = await getFeedByUrl(env, res.url);
-    }
+    let feed = await ensureFeed(env, url, f.title || '');
     if (!feed) continue;
     if (!(await hasSubscription(env, user.id, feed.id))) {
       await addSubscription(env, user.id, feed.id, '', f.group ? [f.group] : []);

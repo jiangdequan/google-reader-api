@@ -76,7 +76,7 @@ export function parseXML(input) {
     const attrRe = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/g;
     let m;
     let rest = src.slice(j);
-    while ((m = attrRe.exec(rest))) {
+    for (m = attrRe.exec(rest); m !== null; m = attrRe.exec(rest)) {
       if (m[1] && m[1] !== '/') {
         tag.attrs[decodeEntities(m[1])] = decodeEntities(m[2] ?? m[3] ?? m[4] ?? '');
       }

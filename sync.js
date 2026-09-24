@@ -1,10 +1,21 @@
 // 订阅源的抓取与入库:拉取单个 feed -> 落库 items -> 裁剪旧数据 -> 更新抓取元信息。
 // 由两处触发:scheduled cron(index.js)以及 /reader/api/0/sync 手动触发。
 import { DEFAULT_MAX_FETCH_PER_CRON, DEFAULT_MAX_ITEMS_PER_FEED, DEFAULT_SYNC_INTERVAL_MIN } from './constants.js';
+import { getFeedByUrl } from './db/feeds.js';
 import { insertFeed, staleFeeds, updateFetchMeta } from './db/feeds.js';
 import { insertNewItems, pruneFeed } from './db/items.js';
 import { now } from './util.js';
 import { fetchFeed } from './feedfetch.js';
+
+// Resolve a feed by URL, fetching + storing it when unknown. Returns the stored
+// row (or a minimal { id, url } fallback) or null when the fetch failed.
+export async function ensureFeed(env, url, title = '') {
+  const existing = await getFeedByUrl(env, url);
+  if (existing) return existing;
+  const res = await fetchAndStoreFeed(env, { url, id: 0, etag: '', updated: 0, title });
+  if (res.error || !res.feedId) return null;
+  return (await getFeedByUrl(env, res.url)) || { id: res.feedId, url: res.url || url };
+}
 
 // 抓取单个 feed 并写入存储。返回 { feedId, url, added } 表示正常入库,
 // { error } 表示抓取/解析失败, { unchanged } 表示服务端 304 无更新。

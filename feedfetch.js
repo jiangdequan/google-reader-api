@@ -1,16 +1,11 @@
 import { DEFAULT_FETCH_TIMEOUT_MS, MAX_FETCH_BODY_BYTES } from './constants.js';
 import { parseFeed } from './feedparser.js';
+import { timeout } from './util.js';
 
 const UA =
   'Mozilla/5.0 (compatible; SelfHostedGoogleReader/1.0; +https://github.com/awesome-workers)';
 const ACCEPT =
   'application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, text/html, */*;q=0.1';
-
-function timeoutOf(ms) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  return { signal: ctrl.signal, clear: () => clearTimeout(timer) };
-}
 
 function normalizeUrl(raw) {
   let s = String(raw || '').trim();
@@ -37,7 +32,8 @@ function discoverFeedLink(html, base) {
         try {
           return new URL(hrefMatch[1], base).href;
         } catch (e) {
-          /* ignore */
+          // Malformed candidate feed link; skip this <link> tag.
+          console.warn('discarding malformed feed href', hrefMatch[1], e && e.message);
         }
       }
     }
@@ -56,7 +52,7 @@ export async function fetchFeed(env, feed) {
   let timer;
   let resp;
   try {
-    const t = timeoutOf(DEFAULT_FETCH_TIMEOUT_MS);
+    const t = timeout(DEFAULT_FETCH_TIMEOUT_MS);
     timer = t;
     resp = await fetch(url, { headers, redirect: 'follow', signal: t.signal });
   } catch (e) {
@@ -84,7 +80,7 @@ export async function fetchFeed(env, feed) {
     if (discovered && discovered !== url) {
       let t2;
       try {
-        const t = timeoutOf(DEFAULT_FETCH_TIMEOUT_MS);
+        const t = timeout(DEFAULT_FETCH_TIMEOUT_MS);
         t2 = t;
         const r2 = await fetch(discovered, {
           headers: { 'User-Agent': UA, Accept: ACCEPT },

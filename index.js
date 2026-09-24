@@ -7,6 +7,29 @@ import * as api from './api/index.js';
 
 const GREADER = '/reader/api/0';
 
+// Credentials may legitimately travel in the query string (?password=, ?auth=
+// tokens, ClientLogin Email/Passwd...); never write their values to logs.
+const SENSITIVE_PARAMS = new Set([
+  'auth',
+  'Token',
+  'token',
+  'T',
+  'login',
+  'Email',
+  'u',
+  'password',
+  'Passwd',
+  'pw',
+]);
+
+function logTarget(u) {
+  const params = [...u.searchParams.entries()]
+    .filter(([name]) => !SENSITIVE_PARAMS.has(name))
+    .map(([name, value]) => `${name}=${value}`)
+    .join('&');
+  return u.pathname + (params ? '?' + params : '');
+}
+
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
@@ -24,7 +47,7 @@ export default {
 
   async fetch(request, env, ctx) {
     const u = new URL(request.url);
-    const brief = u.pathname + u.search;
+    const brief = logTarget(u);
     try {
       await ensureSchema(env);
       await ensureDefaultUsers(env);

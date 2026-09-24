@@ -98,6 +98,14 @@ export function now() {
   return Math.floor(Date.now() / 1000);
 }
 
+// AbortSignal wrapper shared by subrequest fetches (feed pulls, favicon proxy).
+// Caller must invoke clear() once the fetch settled to release the timer.
+export function timeout(ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return { signal: ctrl.signal, clear: () => clearTimeout(timer) };
+}
+
 export function randomHex(bytes = 8) {
   const buf = crypto.getRandomValues(new Uint8Array(bytes));
   return Array.from(buf)

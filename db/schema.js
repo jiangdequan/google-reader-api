@@ -78,6 +78,20 @@ export async function ensureSchema(env) {
   schemaReady.set(env, true);
 }
 
+// Older clients referenced items by rowid (decimal or 1-7 hex, and 16-hex ids
+// pre-dating the tag-id scheme). Map those legacy keys to their current rowid.
+function keyRowid(k) {
+  const s = String(k).trim();
+  let n = NaN;
+  if (s.length === 16 && /^[0-9a-fA-F]{16}$/.test(s)) {
+    n = parseInt(s, 16);
+  } else if (/^[0-9a-fA-F]{1,7}$/.test(s)) {
+    n = /^\d+$/.test(s) ? parseInt(s, 10) : parseInt(s, 16);
+  }
+  if (!Number.isSafeInteger(n) || n <= 0) return null;
+  return { rowid: n, legacy: s };
+}
+
 async function normalizeStateKeys(env) {
   const res = await env.DB.prepare(
     "SELECT DISTINCT item_id FROM (SELECT item_id FROM item_states UNION SELECT item_id FROM item_tags) WHERE item_id NOT LIKE 'tag:%'",
@@ -86,14 +100,8 @@ async function normalizeStateKeys(env) {
   if (!keys.length) return;
   const byRowid = new Map();
   for (const k of keys) {
-    const s = String(k).trim();
-    let n = NaN;
-    if (s.length === 16 && /^[0-9a-fA-F]{16}$/.test(s)) {
-      n = parseInt(s, 16);
-    } else if (/^[0-9a-fA-F]{1,7}$/.test(s)) {
-      n = /^\d+$/.test(s) ? parseInt(s, 10) : parseInt(s, 16);
-    }
-    if (Number.isSafeInteger(n) && n > 0) byRowid.set(n, s);
+    const parsed = keyRowid(k);
+    if (parsed) byRowid.set(parsed.rowid, parsed.legacy);
   }
   const rowids = [...byRowid.keys()];
   for (let i = 0; i < rowids.length; i += SQL_CHUNK) {

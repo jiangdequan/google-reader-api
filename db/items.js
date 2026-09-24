@@ -33,7 +33,8 @@ export async function resolveStreamId(env, token) {
   return { kind: 'unknown' };
 }
 
-export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itResolved = []) {
+export function buildStreamWhere(userId, stream, opts = {}) {
+  const { xtResolved = [], itResolved = [], ot, nt } = opts;
   const labelClause = (name, tagAlias = 't', itemAlias = 'il') => ({
     sql: `(EXISTS (SELECT 1 FROM subscription_tags st JOIN tags ${tagAlias} ON ${tagAlias}.id=st.tag_id
                    WHERE st.user_id=? AND st.feed_id=i.feed_id AND ${tagAlias}.name=?)
@@ -83,7 +84,7 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
     );
   }
 
-  for (const x of xtResolved || []) {
+  for (const x of xtResolved) {
     if (x.kind === 'feed' && x.feedId) {
       add({ sql: 'i.feed_id <> ?', args: [x.feedId] });
     } else if (x.kind === 'label') {
@@ -125,14 +126,7 @@ export function buildStreamWhere(userId, stream, xtResolved = [], ot, nt, itReso
 }
 
 export async function getItemsStream(env, userId, stream, opts) {
-  const { where, args } = buildStreamWhere(
-    userId,
-    stream,
-    opts.xtResolved || [],
-    opts.ot,
-    opts.nt,
-    opts.itResolved || [],
-  );
+  const { where, args } = buildStreamWhere(userId, stream, opts);
   const desc = opts.order !== 'o';
   const order = `i.published ${desc ? 'DESC' : 'ASC'}, i.id ${desc ? 'DESC' : 'ASC'}`;
   const limit = opts.limit || DEFAULT_PAGE_LIMIT;
@@ -179,14 +173,7 @@ export async function getItemsStream(env, userId, stream, opts) {
 }
 
 export async function countStreamItems(env, userId, stream, opts) {
-  const { where, args } = buildStreamWhere(
-    userId,
-    stream,
-    opts.xtResolved || [],
-    opts.ot,
-    opts.nt,
-    opts.itResolved || [],
-  );
+  const { where, args } = buildStreamWhere(userId, stream, opts);
   const r = await env.DB.prepare(
     `SELECT COUNT(*) AS c FROM items i ${where}`,
   )
@@ -196,14 +183,7 @@ export async function countStreamItems(env, userId, stream, opts) {
 }
 
 export async function latestStreamItem(env, userId, stream, opts) {
-  const { where, args } = buildStreamWhere(
-    userId,
-    stream,
-    opts.xtResolved || [],
-    opts.ot,
-    opts.nt,
-    opts.itResolved || [],
-  );
+  const { where, args } = buildStreamWhere(userId, stream, opts);
   const r = await env.DB.prepare(
     `SELECT MAX(i.published) AS m FROM items i ${where}`,
   )
@@ -387,7 +367,7 @@ export async function setItemLabel(env, userId, itemId, label, on) {
 }
 
 export async function markStreamRead(env, userId, stream, tsUsec) {
-  const { where, args } = buildStreamWhere(userId, stream, [], null, null);
+  const { where, args } = buildStreamWhere(userId, stream, {});
 
   // Collect WHERE clauses and their bound params first, then only decorate the
   // tail below (mirrors getItemsStream).
@@ -422,18 +402,23 @@ export async function getItemsByIds(env, userId, ids) {
   const idsLong = [];
   for (const raw of ids) {
     const v = String(raw || '').trim();
-    let m = null;
     if (/^\d+$/.test(v)) {
       rowids.push(v);
-    } else if ((m = v.match(/^tag:google\.com,2005:reader\/item\/([0-9a-fA-F]+)$/)) && m[1].length <= 16) {
-      const n = parseInt(m[1], 16);
-      if (Number.isSafeInteger(n) && n > 0) rowids.push(String(n));
-    } else if ((m = v.match(/^[0-9a-fA-F]{16}$/))) {
-      const n = parseInt(m[0], 16);
-      if (Number.isSafeInteger(n) && n > 0) rowids.push(String(n));
-    } else {
-      idsLong.push(v);
+      continue;
     }
+    const tagMatch = v.match(/^tag:google\.com,2005:reader\/item\/([0-9a-fA-F]+)$/);
+    if (tagMatch && tagMatch[1].length <= 16) {
+      const n = parseInt(tagMatch[1], 16);
+      if (Number.isSafeInteger(n) && n > 0) rowids.push(String(n));
+      continue;
+    }
+    const hex16 = v.match(/^[0-9a-fA-F]{16}$/);
+    if (hex16) {
+      const n = parseInt(hex16[0], 16);
+      if (Number.isSafeInteger(n) && n > 0) rowids.push(String(n));
+      continue;
+    }
+    idsLong.push(v);
   }
   const rows = [];
   const stmts = [];
@@ -459,7 +444,7 @@ export async function getItemsByIds(env, userId, ids) {
 
 export async function searchItems(env, userId, q, opts) {
   const like = '%' + String(q).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
-  const { where, args } = buildStreamWhere(userId, { kind: 'state', state: 'reading-list' }, [], null, null);
+  const { where, args } = buildStreamWhere(userId, { kind: 'state', state: 'reading-list' }, {});
   let sql =
     `SELECT i.rowid, i.id, i.published FROM items i` +
     (where ? ` ${where}` : '') +

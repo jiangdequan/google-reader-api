@@ -18,6 +18,7 @@ export function decodeURIComponentSafe(s) {
   try {
     return decodeURIComponent(s);
   } catch (e) {
+    // Client-supplied ids with stray % just pass through.
     return s;
   }
 }
@@ -71,6 +72,7 @@ export async function readForm(request) {
   try {
     return new URLSearchParams(await request.text());
   } catch (e) {
+    // GET requests carry no body; an empty form is the expected fallback.
     return new URLSearchParams();
   }
 }

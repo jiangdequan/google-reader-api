@@ -9,7 +9,7 @@ import {
 } from '../db/subscriptions.js';
 import { detachLabel } from '../db/tags.js';
 import { getFeedById, getFeedByUrl } from '../db/feeds.js';
-import { fetchAndStoreFeed } from '../sync.js';
+import { ensureFeed } from '../sync.js';
 import { iconUrl, readForm, stripLabel } from './utils.js';
 
 export async function subscriptionList(request, env, user) {
@@ -62,15 +62,7 @@ export async function subscriptionQuickadd(request, env, user) {
   } catch (e) {
     return json({ numResults: 0, query: q, streamId: '' });
   }
-  const existing = await getFeedByUrl(env, q);
-  let feed;
-  if (existing) {
-    feed = existing;
-  } else {
-    const res = await fetchAndStoreFeed(env, { url: q, id: 0, etag: '', updated: 0, title: '' });
-    if (res.error || !res.feedId) return json({ numResults: 0, query: q, streamId: '' });
-    feed = await getFeedByUrl(env, res.url) || { id: res.feedId, url: res.url || q };
-  }
+  const feed = await ensureFeed(env, q);
   if (!feed || !feed.id) return json({ numResults: 0, query: q, streamId: '' });
   if (!(await hasSubscription(env, user.id, feed.id))) {
     await addSubscription(env, user.id, feed.id, '', []);
@@ -107,11 +99,7 @@ export async function subscriptionEdit(request, env, user) {
   if (!s) return text('OK');
 
   let feed = await lookupFeed(s);
-  if (!feed) {
-    const res = await fetchAndStoreFeed(env, { url: s, id: 0, etag: '', updated: 0, title: t });
-    if (res.error || !res.feedId) return text('OK');
-    feed = await getFeedByUrl(env, res.url);
-  }
+  if (!feed) feed = await ensureFeed(env, s, t);
   if (!feed) return text('OK');
 
   const existing = await hasSubscription(env, user.id, feed.id);

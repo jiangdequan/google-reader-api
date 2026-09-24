@@ -21,6 +21,7 @@ export async function parseToken(env, token) {
     if (expected !== b64urlDecode(s)) return null;
     return userId;
   } catch (e) {
+    // Malformed/expired tokens legitimately end here; the 401 below is the signal.
     return null;
   }
 }
@@ -46,6 +47,7 @@ export async function authenticateRequest(request, env, url) {
       const p = raw.slice(idx + 1);
       return await verifyPassword(env, u, p);
     } catch (e) {
+      // Malformed Basic credentials decode to "no auth" -> 401.
       return null;
     }
   }
@@ -77,6 +79,7 @@ export async function clientLogin(request, env, url) {
     try {
       form = new URLSearchParams(await request.text());
     } catch (e) {
+      // GET or empty body: no form; credentials may still come from the URL.
       form = null;
     }
   }
