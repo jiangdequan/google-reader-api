@@ -38,7 +38,18 @@ export async function updateFetchMeta(env, feedId, { error, etag, updated }) {
 }
 
 export async function staleFeeds(env, since, limit) {
-  const res = await env.DB.prepare('SELECT * FROM feeds WHERE last_fetched < ? ORDER BY last_fetched ASC LIMIT ?')
+  const res = await env.DB.prepare(
+    `SELECT *
+       FROM feeds f
+      WHERE f.last_fetched < ?
+        AND EXISTS (
+          SELECT 1
+            FROM subscriptions s
+           WHERE s.feed_id = f.id
+        )
+      ORDER BY f.last_fetched ASC
+      LIMIT ?`,
+  )
     .bind(since, limit)
     .all();
   return res.results || [];
