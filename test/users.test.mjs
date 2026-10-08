@@ -87,3 +87,17 @@ test('ensureDefaultUsers: skips malformed entries and existing users', async () 
   await ensureDefaultUsers({ DB: db, GR_USERS: 'alice:pw,no-separator,bob:pw2,:nouser,,, carl: pw' });
   assert.deepEqual(created, ['bob', 'carl']);
 });
+
+test('ensureDefaultUsers: usersReady WeakMap dedupes per env', async () => {
+  const lookups = [];
+  const db = new FakeDB({
+    onFirst: (s) => {
+      if (s.sql.includes('SELECT id FROM users')) lookups.push(s.args[0]);
+      return { id: 1 };
+    },
+  });
+  const env = { DB: db, GR_USERS: 'alice:pw' };
+  await ensureDefaultUsers(env);
+  await ensureDefaultUsers(env);
+  assert.deepEqual(lookups, ['alice']);
+});

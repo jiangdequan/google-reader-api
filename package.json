@@ -4,8 +4,10 @@
   "description": "Google Reader API-compatible RSS reader backend built on Cloudflare Workers + D1",
   "type": "module",
   "scripts": {
-    "start:gr": "wrangler dev --local --env staging index.js -c wrangler.toml --ip 0.0.0.0",
+    "start": "wrangler dev --local --env staging index.js -c wrangler.toml --ip 0.0.0.0",
     "deploy": "wrangler deploy --env production index.js -c wrangler.toml",
+    "d1:schema": "wrangler d1 execute googlereaderapi-db --local --env staging --file schema.sql",
+    "d1:schema:remote": "wrangler d1 execute googlereaderapi-db --remote --env production --file schema.sql",
     "test": "node --test test/*.test.mjs",
     "format": "prettier --write \"**/*.{js,mjs,json}\"",
     "format:check": "prettier --check \"**/*.{js,mjs,json}\""

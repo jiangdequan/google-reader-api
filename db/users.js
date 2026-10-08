@@ -16,18 +16,23 @@ export async function createUser(env, username, password) {
   return await getUserByUsername(env, username);
 }
 
+const usersReady = new WeakMap();
+
 export async function ensureDefaultUsers(env) {
+  if (usersReady.has(env)) return;
   const raw = env.GR_USERS || (env.GR_USERNAME && env.GR_PASSWORD ? `${env.GR_USERNAME}:${env.GR_PASSWORD}` : '');
-  if (!raw) return;
-  for (const part of raw.split(',')) {
-    const idx = part.indexOf(':');
-    if (idx === -1) continue;
-    const u = part.slice(0, idx).trim();
-    const p = part.slice(idx + 1);
-    if (!u || !p) continue;
-    const existing = await env.DB.prepare('SELECT id FROM users WHERE username=?').bind(u).first();
-    if (!existing) await createUser(env, u, p);
+  if (raw) {
+    for (const part of raw.split(',')) {
+      const idx = part.indexOf(':');
+      if (idx === -1) continue;
+      const u = part.slice(0, idx).trim();
+      const p = part.slice(idx + 1);
+      if (!u || !p) continue;
+      const existing = await env.DB.prepare('SELECT id FROM users WHERE username=?').bind(u).first();
+      if (!existing) await createUser(env, u, p);
+    }
   }
+  usersReady.set(env, true);
 }
 
 export async function getUserByUsername(env, username) {
