@@ -5,7 +5,7 @@
 - 存储：Cloudflare **D1**（SQLite）
 - 定时抓取：Cloudflare **Cron Triggers**
 - 支持 RSS 2.0 / Atom / RSS 1.0（RDF）/ JSON Feed，自动识别网页里的 `<link rel="alternate">`
-- 认证：HTTP Basic、ClientLogin Token、`GoogleLogin auth=`、`?auth=` / `?T=`
+- 认证：HTTP Basic、ClientLogin Token、`GoogleLogin auth=`、`Bearer`、`?auth=` / `?T=`
 - 运行时零第三方依赖，代码自包含
 
 ## 目录结构
@@ -25,6 +25,7 @@
 ├── api/                # API 端点实现（streams / subscriptions / tags / ...）
 ├── db/                 # D1 数据访问 + 建表
 ├── test/               # node:test 单元测试（npm test）
+├── docs/               # API 契约文档（api.md）
 ├── schema.sql          # D1 表结构（可选，Worker 会自动建表）
 ├── wrangler.sample.toml# 配置样例（占位 database_id）
 ├── wrangler.toml       # 实际配置（本地从 sample 复制，已 gitignore）
@@ -40,7 +41,7 @@ npm install
 cp wrangler.sample.toml wrangler.toml   # 若尚未存在，按需修改 database_id / GR_USERS
 
 # 1. 启动本地服务（--env staging，使用本地 D1，自动建表、自动创建默认用户）
-npm run start:gr
+npm run start
 # 也可: npx wrangler dev --env staging
 
 # 2. 浏览器/curl 访问（wrangler 默认监听本地 8787 端口）
@@ -54,8 +55,8 @@ curl "http://localhost:8787/reader/api/0/user-info?output=json" -u admin:changem
 ### 本地手动执行建表 / 查看本地数据
 
 ```bash
-npm run d1:gr                        # 执行 schema.sql（本地 D1）
-npx wrangler d1 execute googlereaderapi-db --command "SELECT 1"
+npm run d1:schema                        # 执行 schema.sql（本地 D1）
+npx wrangler d1 execute googlereaderapi-db --local --command "SELECT 1"
 ```
 
 ## 部署到生产
@@ -90,11 +91,11 @@ JWT_SECRET = "一段足够长的随机字符串"    # 用于签发登录 token
 ### 3. 部署
 
 ```bash
-npm run deploy:gr
+npm run deploy
 # 也可: npx wrangler deploy --env production
 ```
 
-首次请求会自动建表；也可以用 `npm run d1:gr:remote` 手动对生产 D1 执行 `schema.sql`。
+首次请求会自动建表；也可以用 `npm run d1:schema:remote` 手动对生产 D1 执行 `schema.sql`。
 
 ## 在客户端接入
 
@@ -143,6 +144,10 @@ npm run deploy:gr
 | `/reader/subscriptions/import`           | POST     | 导入 OPML                        |
 | `/reader/api/0/sync`                     | POST     | 手动触发一次抓取同步             |
 | `/favicon?host=xxx`                      | GET      | favicon 代理（边缘缓存）         |
+| `/status`                                | GET      | 服务状态                         |
+| `/health`                                | GET      | 健康检查                         |
+
+> 等价别名（兼容客户端）：`/accounts/ClientAuth`（同 `/accounts/ClientLogin`）、`/reader/favicon`（同 `/favicon`）、`/reader/export_opml`（同 OPML 导出）、`/reader/import_opml`（同 OPML 导入）、`/`（同 `/status`）。
 
 ### 常用 stream ID
 
@@ -168,6 +173,9 @@ curl -u admin:pass "https://your-worker/reader/api/0/user-info"
 curl "https://your-worker/accounts/ClientLogin?Email=admin&Passwd=pass"
 #   返回 Auth=<token>，后续用 T=<token> 或 GoogleLogin auth=<token>
 curl -H "Authorization: GoogleLogin auth=<token>" "https://your-worker/reader/api/0/user-info"
+
+# 3. Bearer token（ClientLogin 返回的 Auth 也可直接作 Bearer）
+curl -H "Authorization: Bearer <token>" "https://your-worker/reader/api/0/user-info"
 ```
 
 ## 配置项
@@ -175,6 +183,7 @@ curl -H "Authorization: GoogleLogin auth=<token>" "https://your-worker/reader/ap
 | 变量                 | 说明                                                          | 默认                |
 | -------------------- | ------------------------------------------------------------- | ------------------- |
 | `GR_USERS`           | `用户名:密码`，多个用逗号分隔                                 | `admin:changeme123` |
+| `GR_USERNAME`        | 与 `GR_PASSWORD` 配对的旧变量；仅 `GR_USERS` 未设置时生效     | 无                  |
 | `JWT_SECRET`         | token 签名密钥，务必修改                                      | `greader-secret`    |
 | `SYNC_INTERVAL_MIN`  | 抓取间隔（分钟）                                              | `15`                |
 | `MAX_FETCH_PER_CRON` | 每次 Cron 最多抓取的源数量                                    | `20`                |
@@ -183,9 +192,17 @@ curl -H "Authorization: GoogleLogin auth=<token>" "https://your-worker/reader/ap
 
 Cron 表达式在 `wrangler.toml` 的 `[triggers]` 中，默认 `*/30`（每 30 分钟触发一次）；`SYNC_INTERVAL_MIN` 决定「多久未抓取」的源视为陈旧并在 cron 中补抓。
 
+### 新增用户
+
+原生 Google Reader API 没有「新增用户」接口（当年账号由 Google 账号体系托管），客户端也无法注册；本服务的用户只来自 `GR_USERS` 配置：
+
+- **生产**：编辑 `wrangler.toml` 的 `GR_USERS`（逗号分隔追加 `用户名:密码`）后执行 `npm run deploy`——环境变量在部署时固化，仅改本地文件不会生效。
+- **本地**：修改 `wrangler.toml` 后重启 `npm run start` 即可（改动配置会重置本地 D1，见上文）。
+- 用户**只补不改**：`ensureDefaultUsers` 仅创建缺失的用户，已存在用户的密码不会被 `GR_USERS` 更新。
+
 ## 说明与限制
 
 - 阅读列表默认返回**全部**条目（符合原生 Google Reader 行为）；客户端一般用 `xt=user/-/state/com.google/read` 过滤出未读。
 - 只保留每个源最新的 `MAX_ITEMS_PER_FEED` 条，旧条目自动清理。
 - `POST` 令牌（`T` 参数）不会强制校验，以兼容更多客户端。
-- 首次访问或冷启动会自动执行建表语句（幂等）。
+- 首次访问或冷启动会自动执行建表语句（幂等），并按 `GR_USERS` 补种缺失的默认用户。
